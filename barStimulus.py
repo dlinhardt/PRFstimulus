@@ -34,6 +34,7 @@ class barStimulus(Stimulus):
             flickerFrequency=flickerFrequency,
             continous=continous,
         )
+        self.stimulus_type = 'bar'
 
         self.nBars = nBars
         self.doubleBarRot = doubleBarRot
@@ -57,6 +58,7 @@ class barStimulus(Stimulus):
             self.barWidth = np.ceil(self._stimSize / (self.framesPerCrossing * self.overlap - 0.5)).astype('int')
 
         if not continous:
+            self.continous = False
             self._stimRaw = np.zeros((self.nFrames, self._stimSize, self._stimSize))
             self._stimBase = np.zeros(self.nFrames)  # to find which checkerboard to use
 
@@ -149,6 +151,7 @@ class barStimulus(Stimulus):
             self._stimUnc[:, self._stimMask] = self._stimRaw[:, self._stimMask]
 
         else:
+            self.continous = True
             self.frameMultiplier = self.TR * self.flickerFrequency / 2
             self.nContinousFrames = int(self.nFrames * self.frameMultiplier)
             self.continousBlankLength = int(blank_duration * self.frameMultiplier)

@@ -25,6 +25,7 @@ class wedgeStimulus(Stimulus):
             stim_duration=stim_duration,
             blank_duration=blank_duration,
         )
+        self.stimulus_type = 'wedge'
 
         self.overlap = overlap
 

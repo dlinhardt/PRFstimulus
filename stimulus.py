@@ -35,22 +35,21 @@ class Stimulus:
 
         self.continous = continous
 
-        self.nFrames = int(stim_duration / self.TR)
-        self.blankLength = int(blank_duration / self.TR)
+        self.nFrames = np.ceil(stim_duration / self.TR).astype(int)
+        self.blankLength = np.ceil(blank_duration / self.TR).astype(int)
 
-        if np.mod(stim_duration, self.TR) > 0:
-            print(f'WARNING: stim_duration will be clipped to TR '
-                  f'({self.nFrames*self.TR}s instead of {stim_duration}s)!')
-            self._stim_duration = self.nFrames * self.TR
+        # if np.mod(stim_duration, self.TR) > 0:
+        #     print(f'WARNING: stim_duration will be clipped to TR '
+        #           f'({self.nFrames*self.TR}s instead of {stim_duration}s)!')
+        #     self._stim_duration = self.nFrames * self.TR
 
-        if np.mod(blank_duration, self.TR) > 0 and not self.continous:
-            print(f'WARNING: blank_duration will be clipped to TR '
-                  f'({self.blankLength*self.TR}s instead of {blank_duration}s)!')
-            self._blank_duration = self.blankLength * self.TR
+        # if np.mod(blank_duration, self.TR) > 0 and not self.continous:
+        #     print(f'WARNING: blank_duration will be clipped to TR '
+        #           f'({self.blankLength*self.TR}s instead of {blank_duration}s)!')
+        #     self._blank_duration = self.blankLength * self.TR
 
 
         self.flickerFrequency = flickerFrequency  # Hz
-        self.nFramesFlicker = int(self.nFrames * np.round(self.TR * self.flickerFrequency + .0001))
 
     def save(self):
         pass
@@ -89,7 +88,7 @@ class Stimulus:
             framesPerPos = int(np.round(self.TR * self.flickerFrequency + .0001))
             nF = self.nFrames
 
-            self._flickerUncStim = np.ones((self._stimSize, self._stimSize, nF * 2)) * 128
+            self._flickerUncStim = np.ones((self._stimSize, self._stimSize, nF * framesPerPos)) * 128
         else:
             framesPerPos = 2
             nF = self.nContinousFrames
@@ -98,33 +97,37 @@ class Stimulus:
 
         self._flickerSeqTimeing = np.arange(0, self._stimUnc.shape[0] * self.TR, 1 / self.flickerFrequency)
 
-        self._flickerSeq = np.zeros(self.nFramesFlicker, dtype="int")
+        # self._flickerSeq = np.zeros(nF*framesPerPos, dtype="int")
 
         if self._carrier == "checker":
             for i in range(nF):
-                if self._stimBase[i] == 1:
-                    checkOne = self.checkA
-                    checkTwo = self.checkB
-                elif self._stimBase[i] == 2:
-                    checkOne = self.checkC
-                    checkTwo = self.checkD
-
-                self._flickerUncStim[..., 2 * i][self._stimUnc[i, ...].astype("bool")] = checkOne[self._stimUnc[i, ...].astype("bool")]
-                self._flickerUncStim[..., 2 * i + 1][self._stimUnc[i, ...].astype("bool")] = checkTwo[self._stimUnc[i, ...].astype("bool")]
+                for j in range(framesPerPos):
+                    if self._stimBase[i] == 1:
+                        checkOne = self.checkA
+                        checkTwo = self.checkB
+                    elif self._stimBase[i] == 2:
+                        checkOne = self.checkC
+                        checkTwo = self.checkD
+                    
+                    if np.mod(j, 2) == 0:
+                        self._flickerUncStim[..., framesPerPos * i + j][self._stimUnc[i, ...].astype("bool")
+                                                    ] = checkOne[self._stimUnc[i, ...].astype("bool")]
+                    elif np.mod(j, 2) == 1:
+                        self._flickerUncStim[..., framesPerPos * i + j][self._stimUnc[i, ...].astype("bool")
+                                                    ] = checkTwo[self._stimUnc[i, ...].astype("bool")]
 
         elif self._carrier == "images":
             for i in range(nF):
                 for j in range(framesPerPos):
-                    self._flickerUncStim[..., 2 * i + j][
-                        self._stimUnc[i, ...].astype("bool")
-                    ] = self.carrierImages[
-                        self._stimUnc[i, ...].astype("bool"),
-                        randint(self.carrierImages.shape[-1]),
-                    ]
+                    self._flickerUncStim[..., framesPerPos * i + j][self._stimUnc[i, ...].astype("bool")
+                                                    ] = self.carrierImages[self._stimUnc[i, ...].astype("bool"),
+                                                           randint(self.carrierImages.shape[-1]),]
 
-        for i in range(nF):
-            for j in range(framesPerPos):
-                self._flickerSeq[i * framesPerPos + j] = 2 * i + np.mod(j, 2)
+        # for i in range(nF):
+        #     for j in range(framesPerPos):
+        #         self._flickerSeq[i * framesPerPos + j] = 2 * i + np.mod(j, 2)
+        self._flickerUncStim, self._flickerSeq = np.unique(self._flickerUncStim, axis=-1, return_inverse=True)
+
 
     def saveMrVistaStimulus(self, oName, triggerKey="6"):
         """save the created stimulus as mrVista _images and _params to present it at the scanner"""
@@ -142,7 +145,7 @@ class Stimulus:
                 self.fixSeq[i : i + 4 * chunckSize] = colour
                 i += 4 * chunckSize
             else:
-                if np.random.rand() < 0.35:
+                if np.random.rand() < 0.4:
                     colour = 1 if colour == 2 else 2
                 i += chunckSize
 
@@ -159,14 +162,15 @@ class Stimulus:
             'fixation'   : 'disk',
             'modality'   : 'fMRI',
             'trigger'    : 'scanner triggers computer',
-            'period'     : np.float64((self.nFrames - self.blankLength * self.crossings / 2) * self.TR),
+            'period'     : np.float64(len(self._flickerSeq)/self.flickerFrequency),
             'tempFreq'   : np.float64(self.flickerFrequency),
             'tr'         : np.float64(self.TR),
-            'scanDuration': np.float64((self.nFrames - self.blankLength * self.crossings / 2) * self.TR),
+            'scanDuration': np.float64(len(self._flickerSeq)/self.flickerFrequency),
             'saveMatrix' : 'None',
             'interleaves': [],
             'numImages'  : np.float64(self.nFrames),
             'stimSize'   : 'max',
+            'stimSizePix': np.float64(self._stimSize),
             'radius'     : np.float64(self._maxEcc),
             'prescanDuration' : np.float64(0),
             'runPriority': np.float64(7),
@@ -177,6 +181,12 @@ class Stimulus:
             'countdown'  : np.float64(0),
             'startScan'  : np.float64(0),
         }
+
+        if hasattr(self, '_onsets'):
+            oPara['onsets'] = self._onsets
+            
+        if self.stimulus_type == 'bar':
+            oPara['barWidthDeg'] = np.float64(np.round(self.barWidth / self._stimSize * self._maxEcc * 2, 2))
 
         oMat  = {
             'stimulus' : oStim,

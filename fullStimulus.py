@@ -14,59 +14,108 @@ class fullStimulus(Stimulus):
         maxEcc=7,
         TR=2,
         stim_duration=336,
-        blank_duration=12,
+        off_duration=12,
         on_duration=2,
         nTrials=None,
         loadImages=None,
         flickerFrequency=8,
         whichCheck='bar',
+        jitter=False,
     ):
+        self.stimulus_type = 'full'
+
+        self._maxEcc = maxEcc
+        self._stimSize = stimSize
+        self.TR = TR
+        self._loadImages = loadImages
+        self._carrier = "images" if self._loadImages is not None else "checker"
+        self.continous = np.mod(on_duration, TR) > 0
 
         if nTrials is not None:
             self.nTrials = nTrials
-            stim_duration = int(nTrials * (on_duration + blank_duration))
         else:
-            self.nTrials = int(stim_duration / (on_duration + blank_duration))
-            stim_duration = int(self.nTrials * (on_duration + blank_duration))
+            self.nTrials = int(stim_duration / (on_duration + off_duration))
 
-        continous = np.mod(on_duration, TR) > 0
-        self.on_duration = on_duration
+        if isinstance(on_duration, int):
+            self.on_duration = [on_duration] * self.nTrials
+        elif isinstance(on_duration, list):
+            self.on_duration = np.random.choice(on_duration, self.nTrials)
+            if len(on_duration) <= self.nTrials:
+                while not np.all([i in self.on_duration for i in on_duration]):
+                    self.on_duration = np.random.choice(on_duration, self.nTrials)
+            self.continous = True
 
-        super().__init__(
-            stimSize,
-            maxEcc,
-            TR=TR,
-            stim_duration=stim_duration,
-            blank_duration=blank_duration,
-            loadImages=loadImages,
-            flickerFrequency=flickerFrequency,
-            continous=continous,
-        )
+        if isinstance(off_duration, int):
+            self.off_duration = [off_duration] * self.nTrials
+        elif isinstance(off_duration, list):
+            self.off_duration = np.random.choice(off_duration, self.nTrials)
+            if len(off_duration) <= self.nTrials:
+                while not np.all([i in self.off_duration for i in off_duration]):
+                    self.off_duration = np.random.choice(off_duration, self.nTrials)
+            self.continous = True
+
+        self.stim_duration = int(sum(off_duration) + sum(self.on_duration))
+
+        self.nFrames = np.ceil(self.stim_duration / self.TR).astype(int)
+
+        self.flickerFrequency = flickerFrequency  # Hz
 
         self.whichCheck = whichCheck
         self.crossings  = self.nTrials
+        if jitter:
+            self.continous = True
+            if isinstance(jitter, int):
+                self.jitter = jitter
+            else:
+                self.jitter = 3
+        else:
+            self.jitter = False
+
+        self.min_blank  = 10 #s
 
         if not self.continous:
-            nOnFrames = int(self.on_duration / self.TR)
+            n_on_frames  = np.round(self.on_duration  / self.TR).astype(int)
+            n_off_frames = np.round(self.off_duration / self.TR).astype(int)
 
-            offFrames = np.zeros((self.blankLength, self._stimSize, self._stimSize))
+            # self.blankLength = np.ceil(off_duration / self.TR).astype(int)
+            # off_frames = [np.zeros((self.blankLength, self._stimSize, self._stimSize))] * self.nTrials
 
-            ff = self.nFrames
+            # ff = self.nFrames
 
         else:
             self.frameMultiplier = self.TR * self.flickerFrequency / 2
-            self.nContinousFrames     = int(self.nFrames     * self.frameMultiplier)
-            self.continousBlankLength = int(self.blankLength * self.frameMultiplier)
+            # self.continousBlankLength = int(off_duration / self.TR * self.frameMultiplier)
 
-            nOnFrames = int(self.on_duration / self.TR * self.frameMultiplier)
+            # if not self.jitter:
+            #     off_frames = [np.zeros((self.continousBlankLength, self._stimSize, self._stimSize))] * self.nTrials
+            # else:
+            #     min_blank_cont = np.ceil(self.min_blank / self.TR * self.frameMultiplier).astype(int)
+            #     jj = np.ceil(self.jitter / self.TR  * self.frameMultiplier).astype(int)
+            #     blank_length_frames = np.round(np.random.uniform(max(min_blank_cont, self.continousBlankLength - jj),
+            #                                   self.continousBlankLength + jj,
+            #                                   self.nTrials)).astype(int)
 
-            offFrames = np.zeros((self.continousBlankLength, self._stimSize, self._stimSize))
+            n_on_frames  = np.round(self.on_duration  / self.TR * self.frameMultiplier).astype(int)
+            n_off_frames = np.round(self.off_duration / self.TR * self.frameMultiplier).astype(int)
 
-            ff = self.nContinousFrames
+        on_frames  = [np.ones( (i, self._stimSize, self._stimSize)) for i in n_on_frames ]
+        off_frames = [np.zeros((i, self._stimSize, self._stimSize)) for i in n_off_frames]
 
-        onFrames  = np.ones( (nOnFrames, self._stimSize, self._stimSize))
 
-        self._stimRaw = np.tile(np.concatenate((onFrames, offFrames), 0), [self.nTrials,1,1])
+        self._stimRaw = np.zeros((0, self._stimSize, self._stimSize))
+        self._onsets  = np.zeros((self.nTrials*2))
+        self._onsets[0] = 0
+        for I, (on_frame, off_frame) in enumerate(zip(on_frames, off_frames)):
+            self._stimRaw = np.concatenate((self._stimRaw, on_frame, off_frame), 0)
+
+            self._onsets[2*I+1] = self._onsets[2*I] + len(on_frame)
+            if I < self.nTrials-1:
+                self._onsets[2*I+2] = self._onsets[2*I+1] + len(off_frame)
+
+        if self.continous:
+            self._onsets = self._onsets * 2 / self.flickerFrequency
+            ff = len(self._stimRaw)
+            self.nContinousFrames = ff
 
         self._stimBase = np.ones(ff)  # to find which checkerboard to use
 
@@ -89,9 +138,10 @@ class fullStimulus(Stimulus):
             print(f'Please choose whichCheck form ["bar", "wedge"]!')
 
 
-# if __name__ == '__main__':
-#     foo = fullStimulus(on_duration=.2)
-#     foo.playVid(flicker=True)
+if __name__ == '__main__':
+    from PRFstimulus import fullStimulus
+    foo = fullStimulus(on_duration=2, TR=1.75, maxEcc=9, nTrials=10, off_duration=25, jitter=4)
+    foo.playVid(flicker=True)
 
 
 
