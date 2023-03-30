@@ -122,6 +122,7 @@ class Stimulus:
                                                            randint(self.carrierImages.shape[-1]),]
 
         if compress:
+            print('Compressing stimulus, this may take some time...')
             # get only the unique images to compress the output mat file
             self._flickerUncStim, self._flickerSeq = np.unique(self._flickerUncStim, axis=-1, return_inverse=True)
 
