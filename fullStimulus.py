@@ -131,6 +131,7 @@ class fullStimulus(Stimulus):
 
     def _checkerboard(self):
         if 'bar' in self.whichCheck:
+            self.barWidth = 1e6
             barStimulus._checkerboard(self, nChecks=10)
         elif 'wedge' in self.whichCheck:
             wedgeStimulus._checkerboard(self, nFlickerRings=18, nFlickerWedge=24)
