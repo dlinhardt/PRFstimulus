@@ -44,9 +44,10 @@ class barStimulus(Stimulus):
 
         self.startingDirection = [0, 3, 6, 1, 4, 7, 2, 5]
         self.crossings = len(self.startingDirection)
+        self.nBlanks = 4
 
         self.framesPerCrossing = int(
-            (self.nFrames - 4 * self.blankLength) / self.crossings
+            (self.nFrames - self.nBlanks * self.blankLength) / self.crossings
         )
 
         if self.forceBarWidth is not None:
@@ -224,24 +225,27 @@ class barStimulus(Stimulus):
 
     def _checkerboard(self, nChecks=10):
         """create the four flickering main images"""
-        self.nChecks = nChecks
-        checkSize = np.ceil(self._stimSize / self.nChecks / 2).astype("int")
+
+        # we want at least 1.5 checkers per bar width
+        self.checkSize = np.min((np.ceil(self._stimSize / nChecks / 2).astype(int),
+                                 np.ceil(self.barWidth/1.5))).astype(int)
+        self.nChecks = np.ceil(self._stimSize / self.checkSize / 2).astype(int)
 
         self.checkA = np.kron(
             [[0, 255] * (self.nChecks + 1), [255, 0] * (self.nChecks + 1)] *
             (self.nChecks + 1),
-            np.ones((checkSize, checkSize)),
+            np.ones((self.checkSize, self.checkSize)),
         )[
-            int(checkSize * 3 / 2) : -int(checkSize / 2),
-            int(checkSize / 2) : -int(checkSize * 3 / 2),
+            int(self.checkSize * 3 / 2) : -int(self.checkSize / 2),
+            int(self.checkSize / 2) : -int(self.checkSize * 3 / 2),
         ]
         self.checkB = np.kron(
             [[255, 0] * (self.nChecks + 1), [0, 255] * (self.nChecks + 1)] *
             (self.nChecks + 1),
-            np.ones((checkSize, checkSize)),
+            np.ones((self.checkSize, self.checkSize)),
         )[
-            int(checkSize * 3 / 2) : -int(checkSize / 2),
-            int(checkSize / 2) : -int(checkSize * 3 / 2),
+            int(self.checkSize * 3 / 2) : -int(self.checkSize / 2),
+            int(self.checkSize / 2) : -int(self.checkSize * 3 / 2),
         ]
 
         self.checkC = np.where(
@@ -249,7 +253,7 @@ class barStimulus(Stimulus):
                 np.kron(
                     [[0, 255] * (self.nChecks + 1), [255, 0] * (self.nChecks + 1)] *
                     (self.nChecks + 1),
-                    np.ones((checkSize, checkSize)),
+                    np.ones((self.checkSize, self.checkSize)),
                 ),
                 angle=45,
                 resize=False,
@@ -258,13 +262,13 @@ class barStimulus(Stimulus):
             128,
             0,
             255,
-        )[checkSize:-checkSize, checkSize:-checkSize]
+        )[self.checkSize:-self.checkSize, self.checkSize:-self.checkSize]
         self.checkD = np.where(
             skiT.rotate(
                 np.kron(
                     [[255, 0] * (self.nChecks + 1), [0, 255] * (self.nChecks + 1)] *
                     (self.nChecks + 1),
-                    np.ones((checkSize, checkSize)),
+                    np.ones((self.checkSize, self.checkSize)),
                 ),
                 angle=45,
                 resize=False,
@@ -273,7 +277,7 @@ class barStimulus(Stimulus):
             128,
             0,
             255,
-        )[checkSize:-checkSize, checkSize:-checkSize]
+        )[self.checkSize:-self.checkSize, self.checkSize:-self.checkSize]
 
         if self.checkA.shape[0] != self._stimSize:
             diff = (self.checkA.shape[0] - self._stimSize) / 2
@@ -295,3 +299,15 @@ class barStimulus(Stimulus):
                 np.floor(diff).astype("int") : -np.ceil(diff).astype("int"),
                 np.floor(diff).astype("int") : -np.ceil(diff).astype("int"),
             ]
+
+    def stimulus_length(self):
+        super().stimulus_length()
+        print(f'Frames per crossing: {self.framesPerCrossing} TRs')
+        print(f'blanks: {self.nBlanks} x {self.blankLength} TRs')
+
+    def bar_params(self):
+        if self.nBars > 1:
+            print(f'nBars: {self.nBars}')
+            print(f'shift between bars: {self.nBarShift}')
+            print(f'bar rotation: {self.doubleBarRot}')
+        print(f'Bar width: {np.float64(np.round(self.barWidth / self._stimSize * self._maxEcc * 2, 2))}°')
