@@ -71,7 +71,7 @@ class Stimulus:
 
         self.__dict__ = pickle.loads(dataPickle)
 
-    def flickeringStim(self):
+    def flickeringStim(self, compress=False):
         """create flickering checkerboard stimulus from binary stimulus mask"""
 
         if self._stimSize < 512:
@@ -97,8 +97,6 @@ class Stimulus:
 
         self._flickerSeqTimeing = np.arange(0, self._stimUnc.shape[0] * self.TR, 1 / self.flickerFrequency)
 
-        # self._flickerSeq = np.zeros(nF*framesPerPos, dtype="int")
-
         if self._carrier == "checker":
             for i in range(nF):
                 for j in range(framesPerPos):
@@ -108,32 +106,40 @@ class Stimulus:
                     elif self._stimBase[i] == 2:
                         checkOne = self.checkC
                         checkTwo = self.checkD
-                    
+
                     if np.mod(j, 2) == 0:
-                        self._flickerUncStim[..., framesPerPos * i + j][self._stimUnc[i, ...].astype("bool")
-                                                    ] = checkOne[self._stimUnc[i, ...].astype("bool")]
+                        self._flickerUncStim[..., framesPerPos * i + j][self._stimUnc[i, ...].astype(bool)
+                                                    ] = checkOne[self._stimUnc[i, ...].astype(bool)]
                     elif np.mod(j, 2) == 1:
-                        self._flickerUncStim[..., framesPerPos * i + j][self._stimUnc[i, ...].astype("bool")
-                                                    ] = checkTwo[self._stimUnc[i, ...].astype("bool")]
+                        self._flickerUncStim[..., framesPerPos * i + j][self._stimUnc[i, ...].astype(bool)
+                                                    ] = checkTwo[self._stimUnc[i, ...].astype(bool)]
 
         elif self._carrier == "images":
             for i in range(nF):
                 for j in range(framesPerPos):
-                    self._flickerUncStim[..., framesPerPos * i + j][self._stimUnc[i, ...].astype("bool")
-                                                    ] = self.carrierImages[self._stimUnc[i, ...].astype("bool"),
+                    self._flickerUncStim[..., framesPerPos * i + j][self._stimUnc[i, ...].astype(bool)
+                                                    ] = self.carrierImages[self._stimUnc[i, ...].astype(bool),
                                                            randint(self.carrierImages.shape[-1]),]
 
-        # for i in range(nF):
-        #     for j in range(framesPerPos):
-        #         self._flickerSeq[i * framesPerPos + j] = 2 * i + np.mod(j, 2)
-        self._flickerUncStim, self._flickerSeq = np.unique(self._flickerUncStim, axis=-1, return_inverse=True)
+        if compress:
+            # get only the unique images to compress the output mat file
+            self._flickerUncStim, self._flickerSeq = np.unique(self._flickerUncStim, axis=-1, return_inverse=True)
 
+            # swap the empty image to the first position
+            swap = self._flickerSeq[-1]
+            self._flickerUncStim[...,0], self._flickerUncStim[...,swap] = self._flickerUncStim[...,swap], self._flickerUncStim[...,0]
+            self._flickerSeq[self._flickerSeq==swap], self._flickerSeq[self._flickerSeq==0] = 0, swap
+        else:
+            self._flickerSeq = np.zeros(nF*framesPerPos, dtype=int)
+            for i in range(nF):
+                for j in range(framesPerPos):
+                    self._flickerSeq[i * framesPerPos + j] = 2 * i + np.mod(j, 2)
 
-    def saveMrVistaStimulus(self, oName, triggerKey="6"):
+    def saveMrVistaStimulus(self, oName, triggerKey="6", compress=True):
         """save the created stimulus as mrVista _images and _params to present it at the scanner"""
 
         if not hasattr(self, "_flickerSeq"):
-            self.flickeringStim()
+            self.flickeringStim(compress=True)
 
         self.fixSeq = np.zeros(len(self._flickerSeq))
         chunckSize = 9
@@ -184,9 +190,10 @@ class Stimulus:
 
         if hasattr(self, '_onsets'):
             oPara['onsets'] = self._onsets
-            
+
         if self.stimulus_type == 'bar':
             oPara['barWidthDeg'] = np.float64(np.round(self.barWidth / self._stimSize * self._maxEcc * 2, 2))
+            oPara['checkerSize'] = np.float64(np.round(self.checkSize / self._stimSize * self._maxEcc, 2))
 
         oMat  = {
             'stimulus' : oStim,
@@ -331,6 +338,10 @@ class Stimulus:
         if not hasattr(self, "_stim"):
             self.convHRF()
         return self._stim[:, self._stimMask].T
+
+    def stimulus_length(self):
+        print(f'Stimulus length: {self._stim_duration}s')
+        print(f'length stim_unc: {self.stimUnc.shape[0]} bar positions')
 
     # things we need for every analysis
 
