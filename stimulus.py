@@ -6,6 +6,7 @@ from copy import deepcopy
 import pickle
 from numpy.random import randint
 import skimage.transform as skiT
+from copy import deepcopy
 
 import subprocess
 from glob import glob
@@ -128,8 +129,14 @@ class Stimulus:
 
             # swap the empty image to the first position
             swap = self._flickerSeq[-1]
-            self._flickerUncStim[...,0], self._flickerUncStim[...,swap] = self._flickerUncStim[...,swap], self._flickerUncStim[...,0]
-            self._flickerSeq[self._flickerSeq==swap], self._flickerSeq[self._flickerSeq==0] = 0, swap
+
+            a, b = deepcopy(self._flickerUncStim[...,swap]), deepcopy(self._flickerUncStim[...,0])
+            self._flickerUncStim[...,0], self._flickerUncStim[...,swap] = a, b
+
+            self._flickerSeq[self._flickerSeq==swap] = -1
+            self._flickerSeq[self._flickerSeq==0]    = swap
+            self._flickerSeq[self._flickerSeq==-1] = 0
+
         else:
             self._flickerSeq = np.zeros(nF*framesPerPos, dtype=int)
             for i in range(nF):
@@ -157,9 +164,9 @@ class Stimulus:
                 i += chunckSize
 
         oStim = {
-            'images'    : self.flickerUncStim.astype("uint8"),
-            'seq'       : (self._flickerSeq + 1).astype("uint16"),
-            'seqtiming' : self._flickerSeqTimeing.astype('<f8'),
+            'images'    : np.uint8(self.flickerUncStim),
+            'seq'       : np.uint16(self._flickerSeq + 1),
+            'seqtiming' : np.float64(self._flickerSeqTimeing),
             'cmap'      : np.vstack((aa := np.linspace(0, 1, 256), aa, aa)).T,
             'fixSeq'    : self.fixSeq.astype("uint8"),
         }
@@ -194,7 +201,8 @@ class Stimulus:
 
         if self.stimulus_type == 'bar':
             oPara['barWidthDeg'] = np.float64(np.round(self.barWidth / self._stimSize * self._maxEcc * 2, 2))
-            oPara['checkerSize'] = np.float64(np.round(self.checkSize / self._stimSize * self._maxEcc, 2))
+            if self._loadImages is not None:
+                oPara['checkerSize'] = np.float64(np.round(self.checkSize / self._stimSize * self._maxEcc, 2))
 
         oMat  = {
             'stimulus' : oStim,
@@ -242,20 +250,23 @@ class Stimulus:
                     img_artist.set_data(z[i, ...])
                 plt.pause(0.1)
 
-    def saveVid(self, vPath, vName, z=None):
+    def saveVid(self, vPath, vName, flicker=False, z=None):
         """save the stimulus video to given path, if not defined otherwise, the unconvolved stimulus"""
         if not np.any(z):
-            z = self._stimUnc
-        for i in range(self.nFrames):
+            if flicker:
+                z = np.transpose(self.flickerUncStim, (2,0,1))
+            else:
+                z = self._stimUnc
+        for i in range(z.shape[0]):
             plt.title(i)
-            plt.imshow(z[i, ...])
+            plt.imshow(z[i, ...], cmap='Greys')
             plt.savefig(vPath + "/file%02d_frame.png" % i, dpi=150)
 
         subprocess.call(
             [
                 "ffmpeg",
                 "-framerate",
-                "2",
+                "12",
                 "-i",
                 vPath + "/file%02d_frame.png",
                 "-r",
