@@ -1,18 +1,21 @@
 import numpy as np
 from skimage.transform import resize
-from nipy.modalities.fmri.hrf import spm_hrf_compat
 import matplotlib.pyplot as plt
 from copy import deepcopy
 import pickle
 from numpy.random import randint
 import skimage.transform as skiT
 from copy import deepcopy
+import sys
 
 import subprocess
 from glob import glob
 import os
 from scipy.io import loadmat, savemat
-
+try:
+    from nipy.modalities.fmri.hrf import spm_hrf_compat
+except:
+    print('could not load nipy HRF!')
 
 class Stimulus:
     def __init__(
@@ -359,22 +362,23 @@ class Stimulus:
 
     def convHRF(self):
         """'Convolve stimUnc with SPM HRF"""
-        self.hrf = spm_hrf_compat(np.linspace(0, 30, 15 + 1))
+        if 'nipy.modalities.fmri.hrf' in sys.modules:
+            self.hrf = spm_hrf_compat(np.linspace(0, 30, 15 + 1))
 
-        self._stim = np.apply_along_axis(
-            lambda m: np.convolve(m, self.hrf, mode="full")[:],
-            axis=0,
-            arr=self._stimUnc,
-        )
-        self._stim = self._stim[: self._stimUnc.shape[0], ...]
-
-        if hasattr(self, "_stimUncOrig"):
-            self._stimOrig = np.apply_along_axis(
+            self._stim = np.apply_along_axis(
                 lambda m: np.convolve(m, self.hrf, mode="full")[:],
                 axis=0,
-                arr=self._stimUncOrig,
+                arr=self._stimUnc,
             )
-            self._stimOrig = self._stimOrig[: self._stimUncOrig.shape[0], ...]
+            self._stim = self._stim[: self._stimUnc.shape[0], ...]
+
+            if hasattr(self, "_stimUncOrig"):
+                self._stimOrig = np.apply_along_axis(
+                    lambda m: np.convolve(m, self.hrf, mode="full")[:],
+                    axis=0,
+                    arr=self._stimUncOrig,
+                )
+                self._stimOrig = self._stimOrig[: self._stimUncOrig.shape[0], ...]
 
     # different artificial scotomas
 
