@@ -201,7 +201,7 @@ class Stimulus:
 
         if self.stimulus_type == 'bar':
             oPara['barWidthDeg'] = np.float64(np.round(self.barWidth / self._stimSize * self._maxEcc * 2, 2))
-            if self._loadImages is not None:
+            if self._loadImages is None:
                 oPara['checkerSize'] = np.float64(np.round(self.checkSize / self._stimSize * self._maxEcc, 2))
 
         oMat  = {
