@@ -153,7 +153,7 @@ class barStimulus(Stimulus):
 
         else:
             self.continous = True
-            self.frameMultiplier = self.TR * self.flickerFrequency / 2
+            self.frameMultiplier = self.TR * 16 # hard set the frameMultiplier to TR*16
             self.nContinousFrames = int(self.nFrames * self.frameMultiplier)
             self.continousBlankLength = int(blank_duration * self.frameMultiplier)
             self.framesPerCrossing = int(
