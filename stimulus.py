@@ -431,71 +431,78 @@ class Stimulus:
 
         self._stimUnc *= mask[None, ...]
 
-    def verification(self):
+    def verification(self, version=1):
         """Mask stimulus so that Quadrants:
         IV:  2 stimulations
         III: 4 stimulations
         II:  6 stimulations
         I:   8 stimulations
+        
+        sweeps: horizontal 0, 4
+                tl - br    1, 5
+                vertical   2, 6
+                tr - bl    3, 7
         """
+        if not self.stimulus_type:
+            Warning('Only use this with bar stimuli!')
+            
         self._stimUncOrig = deepcopy(self._stimUnc)
+        
+        size = self._stimSize
+        sizeHalf = size // 2
+        
+        # create masks for single quadrants
+        Q1 = np.ones((size,size))
+        Q2 = np.ones((size,size))
+        Q3 = np.ones((size,size))
+        Q4 = np.ones((size,size))
+        
+        Q1[sizeHalf:, sizeHalf:] = 0
+        Q2[sizeHalf:, :sizeHalf] = 0
+        Q3[:sizeHalf, :sizeHalf] = 0
+        Q4[:sizeHalf, sizeHalf:] = 0
 
-        maskQ1 = np.ones((self._stimSize, self._stimSize))
-        maskQ2 = np.ones((self._stimSize, self._stimSize))
-        maskQ3 = np.ones((self._stimSize, self._stimSize))
-
-        for i in range(self._stimSize):
-            for j in range(self._stimSize):
-                maskQ1[i, j] = (
-                    0
-                    if np.all((i > self._stimSize // 2, j > self._stimSize // 2))
-                    else 1
-                )
-                maskQ2[i, j] = 0 if i > self._stimSize // 2 else 1
-                maskQ3[i, j] = (
-                    0
-                    if np.any((j < self._stimSize // 2, i > self._stimSize // 2))
-                    else 1
-                )
-
-        # 0-18, 18-36, 42-60, 60-78, 84-102, 102-120, 126-144, 144-162
-
-        for i in range(int(self.nFrames)):
-            if i >= 0 and i < self.framesPerCrossing:
-                pass
-            elif i >= self.framesPerCrossing and i < self.framesPerCrossing * 2:
-                self._stimUnc[i, ...] *= maskQ1
-            elif (
-                i >= self.framesPerCrossing * 2 + self.blankLength and
-                i < self.framesPerCrossing * 3 + self.blankLength
-            ):
-                self._stimUnc[i, ...] *= maskQ2
-            elif (
-                i >= self.framesPerCrossing * 3 + self.blankLength and
-                i < self.framesPerCrossing * 4 + self.blankLength
-            ):
-                self._stimUnc[i, ...] *= maskQ3
-            elif (
-                i >= self.framesPerCrossing * 4 + self.blankLength * 2 and
-                i < self.framesPerCrossing * 5 + self.blankLength * 2
-            ):
-                pass
-            elif (
-                i >= self.framesPerCrossing * 5 + self.blankLength * 2 and
-                i < self.framesPerCrossing * 6 + self.blankLength * 2
-            ):
-                self._stimUnc[i, ...] *= maskQ1
-            elif (
-                i >= self.framesPerCrossing * 6 + self.blankLength * 3 and
-                i < self.framesPerCrossing * 7 + self.blankLength * 3
-            ):
-                self._stimUnc[i, ...] *= maskQ2
-            elif (
-                i >= self.framesPerCrossing * 7 + self.blankLength * 3 and
-                i < self.framesPerCrossing * 8 + self.blankLength * 3
-            ):
-                self._stimUnc[i, ...] *= maskQ3
-
+        cross = np.zeros((self.crossings, self.nFrames))
+        for j in range(self.crossings):
+            cross[j, int(self.framesPerCrossing * (j) + self.blankLength * int(j/2)) : int(self.framesPerCrossing * (j+1) + self.blankLength * int(j/2)+.5)] = 1                               
+        
+        cross = cross.astype(bool)
+        
+        if version == 1:
+            # for sweep 1 and 5 mask nothing
+            
+            # for sweep 2 and 6 mask Q1
+            self._stimUnc[cross[1], ...] *= Q1
+            self._stimUnc[cross[5], ...] *= Q1
+            
+            # for sweep 3 and 7 mask Q1 and Q2
+            self._stimUnc[cross[2], ...] *= np.all((Q1, Q2), 0)
+            self._stimUnc[cross[6], ...] *= np.all((Q1, Q2), 0)
+            
+            # for sweep 4 and 8 mask Q1, Q2 and Q3
+            self._stimUnc[cross[3], ...] *= np.all((Q1, Q2, Q3), 0)
+            self._stimUnc[cross[7], ...] *= np.all((Q1, Q2, Q3), 0)
+            
+            
+        elif version == 2:
+            # for sweep 1 and 5 mask nothing
+            self._stimUnc[cross[0], ...] *= Q2
+            self._stimUnc[cross[4], ...] *= Q2
+            
+            # for sweep 2 and 6 mask Q1
+            self._stimUnc[cross[1], ...] *= np.all((Q1, Q2, Q3), 0)
+            self._stimUnc[cross[5], ...] *= np.all((Q1, Q2, Q3), 0)
+            
+            # for sweep 3 and 7 mask Q1 and Q2
+            self._stimUnc[cross[2], ...] *= Q1
+            self._stimUnc[cross[6], ...] *= Q1
+            
+            # for sweep 4 and 8 mask Q1, Q2 and Q3
+            self._stimUnc[cross[3], ...] *= np.all((Q1, Q2, Q3), 0)
+            self._stimUnc[cross[7], ...] *= np.all((Q1, Q2, Q3), 0)
+            
+            
+            
     def _loadCarrierImages(self, loadImages):
         if loadImages.endswith(".mat"):
             self.carrierImages = loadmat(loadImages, simplify_cells=True)["images"][
