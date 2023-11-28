@@ -12,10 +12,105 @@ import subprocess
 from glob import glob
 import os
 from scipy.io import loadmat, savemat
+
 try:
     from nipy.modalities.fmri.hrf import spm_hrf_compat
 except:
-    print('could not load nipy HRF!')
+    print("could not load nipy HRF!")
+    print("we will use the function copied from github!")
+    """
+    Copyright (c) 2006-2021, NIPY Developers
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions are
+    met:
+
+        * Redistributions of source code must retain the above copyright
+        notice, this list of conditions and the following disclaimer.
+
+        * Redistributions in binary form must reproduce the above
+        copyright notice, this list of conditions and the following
+        disclaimer in the documentation and/or other materials provided
+        with the distribution.
+
+        * Neither the name of the NIPY Developers nor the names of any
+        contributors may be used to endorse or promote products derived
+        from this software without specific prior written permission.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE."""
+    import scipy.stats as sps
+
+    def spm_hrf_compat(
+        t,
+        peak_delay=6,
+        under_delay=16,
+        peak_disp=1,
+        under_disp=1,
+        p_u_ratio=6,
+        normalize=True,
+    ):
+        """SPM HRF function from sum of two gamma PDFs
+
+        This function is designed to be partially compatible with SPMs `spm_hrf.m`
+        function.
+
+        The SPN HRF is a *peak* gamma PDF (with location `peak_delay` and dispersion
+        `peak_disp`), minus an *undershoot* gamma PDF (with location `under_delay`
+        and dispersion `under_disp`, and divided by the `p_u_ratio`).
+
+        Parameters
+        ----------
+        t : array-like
+            vector of times at which to sample HRF.
+        peak_delay : float, optional
+            delay of peak.
+        under_delay : float, optional
+            delay of undershoot.
+        peak_disp : float, optional
+            width (dispersion) of peak.
+        under_disp : float, optional
+            width (dispersion) of undershoot.
+        p_u_ratio : float, optional
+            peak to undershoot ratio.  Undershoot divided by this value before
+            subtracting from peak.
+        normalize : {True, False}, optional
+            If True, divide HRF values by their sum before returning.  SPM does this
+            by default.
+
+        Returns
+        -------
+        hrf : array
+            vector length ``len(t)`` of samples from HRF at times `t`.
+
+        Notes
+        -----
+        See ``spm_hrf.m`` in the SPM distribution.
+        """
+        if len([v for v in [peak_delay, peak_disp, under_delay, under_disp] if v <= 0]):
+            raise ValueError("delays and dispersions must be > 0")
+        # gamma.pdf only defined for t > 0
+        hrf = np.zeros(t.shape, dtype=np.float64)
+        pos_t = t[t > 0]
+        peak = sps.gamma.pdf(pos_t, peak_delay / peak_disp, loc=0, scale=peak_disp)
+        undershoot = sps.gamma.pdf(
+            pos_t, under_delay / under_disp, loc=0, scale=under_disp
+        )
+        hrf[t > 0] = peak - undershoot / p_u_ratio
+        if not normalize:
+            return hrf
+        return hrf / np.sum(hrf)
+
 
 class Stimulus:
     def __init__(
@@ -29,7 +124,6 @@ class Stimulus:
         flickerFrequency=8,
         continous=False,
     ):
-
         self._maxEcc = maxEcc
         self._stimSize = stimSize
         self.TR = TR
@@ -51,7 +145,6 @@ class Stimulus:
         #     print(f'WARNING: blank_duration will be clipped to TR '
         #           f'({self.blankLength*self.TR}s instead of {blank_duration}s)!')
         #     self._blank_duration = self.blankLength * self.TR
-
 
         self.flickerFrequency = flickerFrequency  # Hz
 
@@ -89,19 +182,30 @@ class Stimulus:
             Warning(f"Invalid carrier {self._carrier}, choose from [checker, images]!")
 
         if not self.continous:
-            framesPerPos = int(np.round(self.TR * self.flickerFrequency + .0001))
+            framesPerPos = int(np.round(self.TR * self.flickerFrequency + 1e-4))
             nF = self.nFrames
 
-            self._flickerUncStim = np.ones((self._stimSize, self._stimSize, nF * framesPerPos)) * 128
         else:
-            framesPerPos = 2
+            framesPerPos = int(
+                np.round(self.TR / self.frameMultiplier * self.flickerFrequency + 1e-4)
+            )
             nF = self.nContinousFrames
 
-            self._flickerUncStim = np.ones((self._stimSize, self._stimSize, nF * 2 + 1)) * 128
+        if framesPerPos == 0:
+            print(
+                f"continous_multiplier ({self.frameMultiplier / self.TR}) is not allowed to be greater than flickerFrequency ({self.flickerFrequency})"
+            )
 
-        self._flickerSeqTimeing = np.arange(0, self._stimUnc.shape[0] * self.TR, 1 / self.flickerFrequency)
+        self._flickerUncStim = (
+            np.ones((self._stimSize, self._stimSize, nF * framesPerPos)) * 128
+        )
+
+        self._flickerSeqTimeing = np.arange(
+            0, self._stimUnc.shape[0] * self.TR, 1 / self.flickerFrequency
+        )
 
         if self._carrier == "checker":
+            running_counter = 0
             for i in range(nF):
                 for j in range(framesPerPos):
                     if self._stimBase[i] == 1:
@@ -111,37 +215,47 @@ class Stimulus:
                         checkOne = self.checkC
                         checkTwo = self.checkD
 
-                    if np.mod(j, 2) == 0:
-                        self._flickerUncStim[..., framesPerPos * i + j][self._stimUnc[i, ...].astype(bool)
-                                                    ] = checkOne[self._stimUnc[i, ...].astype(bool)]
-                    elif np.mod(j, 2) == 1:
-                        self._flickerUncStim[..., framesPerPos * i + j][self._stimUnc[i, ...].astype(bool)
-                                                    ] = checkTwo[self._stimUnc[i, ...].astype(bool)]
+                    if np.mod(running_counter, 2) == 0:
+                        self._flickerUncStim[..., framesPerPos * i + j][
+                            self._stimUnc[i, ...].astype(bool)
+                        ] = checkOne[self._stimUnc[i, ...].astype(bool)]
+                    elif np.mod(running_counter, 2) == 1:
+                        self._flickerUncStim[..., framesPerPos * i + j][
+                            self._stimUnc[i, ...].astype(bool)
+                        ] = checkTwo[self._stimUnc[i, ...].astype(bool)]
+                    running_counter += 1
 
         elif self._carrier == "images":
             for i in range(nF):
                 for j in range(framesPerPos):
-                    self._flickerUncStim[..., framesPerPos * i + j][self._stimUnc[i, ...].astype(bool)
-                                                    ] = self.carrierImages[self._stimUnc[i, ...].astype(bool),
-                                                           randint(self.carrierImages.shape[-1]),]
+                    self._flickerUncStim[..., framesPerPos * i + j][
+                        self._stimUnc[i, ...].astype(bool)
+                    ] = self.carrierImages[
+                        self._stimUnc[i, ...].astype(bool),
+                        randint(self.carrierImages.shape[-1]),
+                    ]
 
         if compress:
-            print('Compressing stimulus, this may take some time...')
+            print("Compressing stimulus, this may take some time...")
             # get only the unique images to compress the output mat file
-            self._flickerUncStim, self._flickerSeq = np.unique(self._flickerUncStim, axis=-1, return_inverse=True)
+            self._flickerUncStim, self._flickerSeq = np.unique(
+                self._flickerUncStim, axis=-1, return_inverse=True
+            )
 
             # swap the empty image to the first position
             swap = self._flickerSeq[-1]
 
-            a, b = deepcopy(self._flickerUncStim[...,swap]), deepcopy(self._flickerUncStim[...,0])
-            self._flickerUncStim[...,0], self._flickerUncStim[...,swap] = a, b
+            a, b = deepcopy(self._flickerUncStim[..., swap]), deepcopy(
+                self._flickerUncStim[..., 0]
+            )
+            self._flickerUncStim[..., 0], self._flickerUncStim[..., swap] = a, b
 
-            self._flickerSeq[self._flickerSeq==swap] = -1
-            self._flickerSeq[self._flickerSeq==0]    = swap
-            self._flickerSeq[self._flickerSeq==-1] = 0
+            self._flickerSeq[self._flickerSeq == swap] = -1
+            self._flickerSeq[self._flickerSeq == 0] = swap
+            self._flickerSeq[self._flickerSeq == -1] = 0
 
         else:
-            self._flickerSeq = np.zeros(nF*framesPerPos, dtype=int)
+            self._flickerSeq = np.zeros(nF * framesPerPos, dtype=int)
             for i in range(nF):
                 for j in range(framesPerPos):
                     self._flickerSeq[i * framesPerPos + j] = 2 * i + np.mod(j, 2)
@@ -167,49 +281,53 @@ class Stimulus:
                 i += chunckSize
 
         oStim = {
-            'images'    : np.uint8(self.flickerUncStim),
-            'seq'       : np.uint16(self._flickerSeq + 1),
-            'seqtiming' : np.float64(self._flickerSeqTimeing),
-            'cmap'      : np.vstack((aa := np.linspace(0, 1, 256), aa, aa)).T,
-            'fixSeq'    : self.fixSeq.astype("uint8"),
+            "images": np.uint8(self.flickerUncStim),
+            "seq": np.uint16(self._flickerSeq + 1),
+            "seqtiming": np.float64(self._flickerSeqTimeing),
+            "cmap": np.vstack((aa := np.linspace(0, 1, 256), aa, aa)).T,
+            "fixSeq": self.fixSeq.astype("uint8"),
         }
 
         oPara = {
-            'experiment' : 'experiment from file',
-            'fixation'   : 'disk',
-            'modality'   : 'fMRI',
-            'trigger'    : 'scanner triggers computer',
-            'period'     : np.float64(len(self._flickerSeq)/self.flickerFrequency),
-            'tempFreq'   : np.float64(self.flickerFrequency),
-            'tr'         : np.float64(self.TR),
-            'scanDuration': np.float64(len(self._flickerSeq)/self.flickerFrequency),
-            'saveMatrix' : 'None',
-            'interleaves': [],
-            'numImages'  : np.float64(self.nFrames),
-            'stimSize'   : 'max',
-            'stimSizePix': np.float64(self._stimSize),
-            'radius'     : np.float64(self._maxEcc),
-            'prescanDuration' : np.float64(0),
-            'runPriority': np.float64(7),
-            'calibration': [],
-            'numCycles'  : np.float64(1),
-            'repetitions': np.float64(1),
-            'motionSteps': np.float64(2),
-            'countdown'  : np.float64(0),
-            'startScan'  : np.float64(0),
+            "experiment": "experiment from file",
+            "fixation": "disk",
+            "modality": "fMRI",
+            "trigger": "scanner triggers computer",
+            "period": np.float64(len(self._flickerSeq) / self.flickerFrequency),
+            "tempFreq": np.float64(self.flickerFrequency),
+            "tr": np.float64(self.TR),
+            "scanDuration": np.float64(len(self._flickerSeq) / self.flickerFrequency),
+            "saveMatrix": "None",
+            "interleaves": [],
+            "numImages": np.float64(self.nFrames),
+            "stimSize": "max",
+            "stimSizePix": np.float64(self._stimSize),
+            "radius": np.float64(self._maxEcc),
+            "prescanDuration": np.float64(0),
+            "runPriority": np.float64(7),
+            "calibration": [],
+            "numCycles": np.float64(1),
+            "repetitions": np.float64(1),
+            "motionSteps": np.float64(2),
+            "countdown": np.float64(0),
+            "startScan": np.float64(0),
         }
 
-        if hasattr(self, '_onsets'):
-            oPara['onsets'] = self._onsets
+        if hasattr(self, "_onsets"):
+            oPara["onsets"] = self._onsets
 
-        if self.stimulus_type == 'bar':
-            oPara['barWidthDeg'] = np.float64(np.round(self.barWidth / self._stimSize * self._maxEcc * 2, 2))
+        if self.stimulus_type == "bar":
+            oPara["barWidthDeg"] = np.float64(
+                np.round(self.bar_width / self._stimSize * self._maxEcc * 2, 2)
+            )
             if self._loadImages is None:
-                oPara['checkerSize'] = np.float64(np.round(self.checkSize / self._stimSize * self._maxEcc, 2))
+                oPara["checkerSize"] = np.float64(
+                    np.round(self.checkSize / self._stimSize * self._maxEcc, 2)
+                )
 
-        oMat  = {
-            'stimulus' : oStim,
-            'params'   : oPara,
+        oMat = {
+            "stimulus": oStim,
+            "params": oPara,
         }
 
         # if "/" not in oName:
@@ -257,12 +375,12 @@ class Stimulus:
         """save the stimulus video to given path, if not defined otherwise, the unconvolved stimulus"""
         if not np.any(z):
             if flicker:
-                z = np.transpose(self.flickerUncStim, (2,0,1))
+                z = np.transpose(self.flickerUncStim, (2, 0, 1))
             else:
                 z = self._stimUnc
         for i in range(z.shape[0]):
             plt.title(i)
-            plt.imshow(z[i, ...], cmap='Greys')
+            plt.imshow(z[i, ...], cmap="Greys")
             plt.savefig(vPath + "/file%02d_frame.png" % i, dpi=150)
 
         subprocess.call(
@@ -283,7 +401,7 @@ class Stimulus:
             os.remove(file_name)
 
     def _cart2pol(self, x, y):
-        rho = np.sqrt(x ** 2 + y ** 2)
+        rho = np.sqrt(x**2 + y**2)
         phi = np.arctan2(y, x)
         return rho, phi
 
@@ -350,35 +468,33 @@ class Stimulus:
 
     @property
     def stimVec(self):
-        if not hasattr(self, "_stim"):
-            self.convHRF()
-        return self._stim[:, self._stimMask].T
+        return self.stim[:, self._stimMask].T
 
     def stimulus_length(self):
-        print(f'Stimulus length: {self._stim_duration}s')
-        print(f'length stim_unc: {self.stimUnc.shape[0]} bar positions')
+        print(f"Stimulus length: {self._stim_duration}s")
+        print(f"length stim_unc: {self.stimUnc.shape[0]} bar positions")
 
     # things we need for every analysis
 
     def convHRF(self):
         """'Convolve stimUnc with SPM HRF"""
-        if 'nipy.modalities.fmri.hrf' in sys.modules:
-            self.hrf = spm_hrf_compat(np.linspace(0, 30, 15 + 1))
+        # if 'nipy.modalities.fmri.hrf' in sys.modules:
+        self.hrf = spm_hrf_compat(np.linspace(0, 30, 15 + 1))
 
-            self._stim = np.apply_along_axis(
+        self._stim = np.apply_along_axis(
+            lambda m: np.convolve(m, self.hrf, mode="full")[:],
+            axis=0,
+            arr=self._stimUnc,
+        )
+        self._stim = self._stim[: self._stimUnc.shape[0], ...]
+
+        if hasattr(self, "_stimUncOrig"):
+            self._stimOrig = np.apply_along_axis(
                 lambda m: np.convolve(m, self.hrf, mode="full")[:],
                 axis=0,
-                arr=self._stimUnc,
+                arr=self._stimUncOrig,
             )
-            self._stim = self._stim[: self._stimUnc.shape[0], ...]
-
-            if hasattr(self, "_stimUncOrig"):
-                self._stimOrig = np.apply_along_axis(
-                    lambda m: np.convolve(m, self.hrf, mode="full")[:],
-                    axis=0,
-                    arr=self._stimUncOrig,
-                )
-                self._stimOrig = self._stimOrig[: self._stimUncOrig.shape[0], ...]
+            self._stimOrig = self._stimOrig[: self._stimUncOrig.shape[0], ...]
 
     # different artificial scotomas
 
@@ -437,26 +553,26 @@ class Stimulus:
         III: 4 stimulations
         II:  6 stimulations
         I:   8 stimulations
-        
+
         sweeps: horizontal 0, 4
                 tl - br    1, 5
                 vertical   2, 6
                 tr - bl    3, 7
         """
         if not self.stimulus_type:
-            Warning('Only use this with bar stimuli!')
-            
+            Warning("Only use this with bar stimuli!")
+
         self._stimUncOrig = deepcopy(self._stimUnc)
-        
+
         size = self._stimSize
         sizeHalf = size // 2
-        
+
         # create masks for single quadrants
-        Q1 = np.ones((size,size))
-        Q2 = np.ones((size,size))
-        Q3 = np.ones((size,size))
-        Q4 = np.ones((size,size))
-        
+        Q1 = np.ones((size, size))
+        Q2 = np.ones((size, size))
+        Q3 = np.ones((size, size))
+        Q4 = np.ones((size, size))
+
         Q1[sizeHalf:, sizeHalf:] = 0
         Q2[sizeHalf:, :sizeHalf] = 0
         Q3[:sizeHalf, :sizeHalf] = 0
@@ -464,45 +580,49 @@ class Stimulus:
 
         cross = np.zeros((self.crossings, self.nFrames))
         for j in range(self.crossings):
-            cross[j, int(self.framesPerCrossing * (j) + self.blankLength * int(j/2)) : int(self.framesPerCrossing * (j+1) + self.blankLength * int(j/2)+.5)] = 1                               
-        
+            cross[
+                j,
+                int(self.framesPerCrossing * (j) + self.blankLength * int(j / 2)) : int(
+                    self.framesPerCrossing * (j + 1)
+                    + self.blankLength * int(j / 2)
+                    + 0.5
+                ),
+            ] = 1
+
         cross = cross.astype(bool)
-        
+
         if version == 1:
             # for sweep 1 and 5 mask nothing
-            
+
             # for sweep 2 and 6 mask Q1
             self._stimUnc[cross[1], ...] *= Q1
             self._stimUnc[cross[5], ...] *= Q1
-            
+
             # for sweep 3 and 7 mask Q1 and Q2
             self._stimUnc[cross[2], ...] *= np.all((Q1, Q2), 0)
             self._stimUnc[cross[6], ...] *= np.all((Q1, Q2), 0)
-            
+
             # for sweep 4 and 8 mask Q1, Q2 and Q3
             self._stimUnc[cross[3], ...] *= np.all((Q1, Q2, Q3), 0)
             self._stimUnc[cross[7], ...] *= np.all((Q1, Q2, Q3), 0)
-            
-            
+
         elif version == 2:
             # for sweep 1 and 5 mask nothing
             self._stimUnc[cross[0], ...] *= Q2
             self._stimUnc[cross[4], ...] *= Q2
-            
+
             # for sweep 2 and 6 mask Q1
             self._stimUnc[cross[1], ...] *= np.all((Q1, Q2, Q3), 0)
             self._stimUnc[cross[5], ...] *= np.all((Q1, Q2, Q3), 0)
-            
+
             # for sweep 3 and 7 mask Q1 and Q2
             self._stimUnc[cross[2], ...] *= Q1
             self._stimUnc[cross[6], ...] *= Q1
-            
+
             # for sweep 4 and 8 mask Q1, Q2 and Q3
             self._stimUnc[cross[3], ...] *= np.all((Q1, Q2, Q3), 0)
             self._stimUnc[cross[7], ...] *= np.all((Q1, Q2, Q3), 0)
-            
-            
-            
+
     def _loadCarrierImages(self, loadImages):
         if loadImages.endswith(".mat"):
             self.carrierImages = loadmat(loadImages, simplify_cells=True)["images"][
@@ -511,8 +631,8 @@ class Stimulus:
 
             # resize them if necessary
             if (
-                self.carrierImages.shape[0] != self._stimSize or
-                self.carrierImages.shape[1] != self._stimSize
+                self.carrierImages.shape[0] != self._stimSize
+                or self.carrierImages.shape[1] != self._stimSize
             ):
                 self.carrierImages = resize(
                     self.carrierImages,
