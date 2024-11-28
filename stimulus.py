@@ -341,8 +341,8 @@ class Stimulus:
         """play the stimulus video, if not defined otherwise, the unconvolved stimulus"""
 
         if flicker:
-            if not hasattr(self, "_flickerSeq"):
-                self.flickeringStim()
+            if not hasattr(self, "_flickerUncSeq"):
+                self.flickeringStim(compress=True)
 
             plt.figure(constrained_layout=True)
             plt.gca().set_aspect("equal", "box")
@@ -417,6 +417,7 @@ class Stimulus:
 
         y, x = np.ogrid[-x0 : n - x0, -y0 : n - y0]
         self._stimMask = x * x + y * y <= r * r
+        return self._stimMask
 
     @property
     def xVec(self):

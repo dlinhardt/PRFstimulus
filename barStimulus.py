@@ -23,6 +23,7 @@ class barStimulus(Stimulus):
         flickerFrequency=8,
         forceBarWidth=None,
         continous_multiplier=2,
+        startingDirection=[0, 3, 6, 1, 4, 7, 2, 5],
     ):
         super().__init__(
             stimSize,
@@ -36,13 +37,14 @@ class barStimulus(Stimulus):
         )
         self.stimulus_type = "bar"
 
+        self.startingDirection = startingDirection
+
         self.nBars = nBars
         self.doubleBarRot = doubleBarRot
         self.thickRatio = thickRatio
 
         self.forceBarWidth = forceBarWidth
 
-        self.startingDirection = [0, 3, 6, 1, 4, 7, 2, 5]
         self.crossings = len(self.startingDirection)
         self.nBlanks = 4
 
