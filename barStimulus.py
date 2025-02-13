@@ -24,6 +24,7 @@ class barStimulus(Stimulus):
         forceBarWidth=None,
         continous_multiplier=2,
         startingDirection=[0, 3, 6, 1, 4, 7, 2, 5],
+        background=128,
     ):
         # Initialize common parameters from parent
         super().__init__(
@@ -35,6 +36,7 @@ class barStimulus(Stimulus):
             loadImages=loadImages,
             flickerFrequency=flickerFrequency,
             continous=continous,
+            background=background,
         )
         self.stimulus_type = "bar"
         self.startingDirection = startingDirection
@@ -245,10 +247,10 @@ class barStimulus(Stimulus):
             resize=False,
             order=0,
         )
-        self.checkC = np.where(rotatedA < 128, 0, 255)[
+        self.checkC = np.where(rotatedA < self.background, 0, 255)[
             crop_rotated[0] : crop_rotated[1], crop_rotated[2] : crop_rotated[3]
         ]
-        self.checkD = np.where(rotatedB < 128, 0, 255)[
+        self.checkD = np.where(rotatedB < self.background, 0, 255)[
             crop_rotated[0] : crop_rotated[1], crop_rotated[2] : crop_rotated[3]
         ]
 
