@@ -4,14 +4,17 @@ import matplotlib.pyplot as plt
 from copy import deepcopy
 import pickle
 from numpy.random import randint
-import skimage.transform as skiT
 from copy import deepcopy
-import sys
-
 import subprocess
 from glob import glob
 import os
 from scipy.io import loadmat, savemat
+
+try:
+    import cupy as cp
+except:
+    print("Could not load cupy, can not compress stimulus on GPU!")
+    cp = None
 
 try:
     from nipy.modalities.fmri.hrf import spm_hrf_compat
@@ -123,6 +126,7 @@ class Stimulus:
         loadImages=None,
         flickerFrequency=8,
         continous=False,
+        background=128,
     ):
         self._maxEcc = maxEcc
         self._stimSize = stimSize
@@ -130,6 +134,9 @@ class Stimulus:
         self._loadImages = loadImages
         self._carrier = "images" if self._loadImages is not None else "checker"
         self._stim_duration = stim_duration
+        self.background = background
+
+        self._is_compressed = False
 
         self.continous = continous
 
@@ -168,7 +175,7 @@ class Stimulus:
 
         self.__dict__ = pickle.loads(dataPickle)
 
-    def flickeringStim(self, compress=False):
+    def flickeringStim(self, compress=False, gpu=False):
         """Create flickering stimulus with cleaner structure."""
         if self._stimSize < 512:
             print("Consider using a higher resolution, e.g. 1024x1024")
@@ -191,7 +198,7 @@ class Stimulus:
             self._apply_image_flicker(nF, framesPerPos)
 
         if compress:
-            self._compress_stimulus()
+            self._compress_stimulus(gpu=gpu)
         else:
             self._set_flicker_sequence(nF, framesPerPos)
 
@@ -215,7 +222,8 @@ class Stimulus:
     def _init_flickerStim(self, nF, framesPerPos):
         """Initialize flickering stimulus and sequence timing arrays."""
         self._flickerUncStim = (
-            np.ones((self._stimSize, self._stimSize, nF * framesPerPos)) * 128
+            np.ones((self._stimSize, self._stimSize, nF * framesPerPos))
+            * self.background
         )
         self._flickerSeqTimeing = np.arange(
             0, self._stimUnc.shape[0] * self.TR, 1 / self.flickerFrequency
@@ -257,12 +265,28 @@ class Stimulus:
                     mask, rand_idx
                 ]
 
-    def _compress_stimulus(self):
+    def _compress_stimulus(self, gpu=False):
         """Compress the stimulus output."""
-        print("Compressing stimulus, this may take some time...")
-        self._flickerUncStim, self._flickerSeq = np.unique(
-            self._flickerUncStim, axis=-1, return_inverse=True
-        )
+        if self._is_compressed:
+            print("Already compressed, skipping compression...")
+        else:
+            print("Compressing stimulus, this may take some time...")
+            if gpu:
+                _flickerUncStim, _flickerSeq = cp.unique(
+                    cp.asarray(self._flickerUncStim, dtype=cp.uint8),
+                    axis=-1,
+                    return_inverse=True,
+                )
+                self._flickerUncStim = cp.asnumpy(_flickerUncStim)
+                self._flickerSeq = cp.asnumpy(_flickerSeq)
+                mempool = cp.get_default_memory_pool()
+                mempool.free_all_blocks()
+            else:
+                self._flickerUncStim, self._flickerSeq = np.unique(
+                    np.uint8(self._flickerUncStim), axis=-1, return_inverse=True
+                )
+            self._is_compressed = True
+
         # Move the empty image to the first position.
         swap = self._flickerSeq[-1]
         a = deepcopy(self._flickerUncStim[..., swap])
@@ -340,12 +364,14 @@ class Stimulus:
                 )
         return oStim, oPara
 
-    def saveMrVistaStimulus(self, oName, triggerKey="6", compress=True):
+    def saveMrVistaStimulus(self, oName, triggerKey="6", gpu=False):
         """
         Save the created stimulus as mrVista _images and _params to present it at the scanner.
         """
         if not hasattr(self, "_flickerSeq"):
-            self.flickeringStim(compress=True)
+            self.flickeringStim(compress=True, gpu=gpu)
+        else:
+            self._compress_stimulus(gpu=gpu)
 
         self.fixSeq = self._create_fixation_sequence(len(self._flickerSeq))
         oStim, oPara = self._prepare_output()
@@ -358,12 +384,12 @@ class Stimulus:
         savemat(oName, oMat, do_compression=True)
         print("saved.")
 
-    def playVid(self, z=None, flicker=False):
+    def playVid(self, z=None, flicker=False, gpu=False):
         """play the stimulus video, if not defined otherwise, the unconvolved stimulus"""
 
         if flicker:
             if not hasattr(self, "_flickerUncSeq"):
-                self.flickeringStim(compress=True)
+                self.flickeringStim(compress=True, gpu=gpu)
 
             plt.figure(constrained_layout=True)
             plt.gca().set_aspect("equal", "box")
@@ -674,3 +700,113 @@ class Stimulus:
 
         else:
             Warning("Please provide carrier images as .mat file!")
+
+    def word_in_center(
+        self, word_list, word_size, paradigm, onsets=None, stim_length=None
+    ):
+        """Create a stimulus with a word in the center"""
+        # create the list of words as images
+        self._word_images = self._create_word_images(word_list, word_size)
+
+        # Keep a copy of the original stimulus
+        self._stimUncOrig = deepcopy(self._stimUnc)
+        if not hasattr(self, "_flickerUncStim"):
+            self.flickeringStim(compress=False)
+
+        if paradigm == "block":
+            if onsets is None or stim_length is None:
+                Warning(
+                    "Please provide onsets and stim_length for block paradigm in seconds!"
+                )
+            self._block_words(onsets, stim_length)
+        elif paradigm == "continous":
+            self._continous_words()
+        else:
+            Warning(f"Chose the paradigm from [block, continous]!")
+
+    def _block_words(self, onsets, stim_length):
+        """onsets define the start of each block in seconds, stim_length the length of each block in seconds"""
+        # re-calculate the onsets and stim_length to frames
+        if not hasattr(onsets, "__len__"):
+            Warning("Please provide onsets as list!")
+        if hasattr(stim_length, "__len__"):
+            Warning("Please provide stim_length as scalar!")
+
+        onsets = np.array(onsets) * self.flickerFrequency
+        stim_length = stim_length * self.flickerFrequency
+
+        total_frames = self._flickerUncStim.shape[-1]
+        for i in range(total_frames):
+            # Select a random word only every third frame
+            if i % 4 == 0:
+                selected_word = self._word_images[randint(len(self._word_images))]
+            # only add words after onset for stim_length frames and when frame index mod 4 != 3
+            if (
+                np.any(i >= onsets)
+                and np.any(i < onsets + stim_length)
+                and (i % 4 != 3)
+            ):
+                self._flickerUncStim[..., i] = self._add_word(
+                    self._flickerUncStim[..., i], selected_word
+                )
+
+    def _continous_words(self):
+        """show words whenever a bar is present"""
+        # Cycle: add word for three frames, then skip one frame
+        total_frames = self._flickerUncStim.shape[-1]
+        for i in range(total_frames):
+            # Select a random word only every third frame
+            if i % 4 == 0:
+                selected_word = self._word_images[randint(len(self._word_images))]
+            # Only add a word for nonblank frames and when frame index mod 4 != 3
+            if np.unique(self._flickerUncStim[..., i]).size > 1 and (i % 4 != 3):
+                self._flickerUncStim[..., i] = self._add_word(
+                    self._flickerUncStim[..., i], selected_word
+                )
+
+    def _add_word(self, im, word):
+        """Add a word to the center of the image"""
+        x_start = im.shape[0] // 2 - word.shape[1] // 2
+        x_end = x_start + word.shape[1]
+        y_start = im.shape[1] // 2 - word.shape[0] // 2
+        y_end = y_start + word.shape[0]
+
+        im[y_start:y_end, x_start:x_end] = word
+        return im
+
+    def _create_word_images(self, word_list, word_size):
+        """create images from all words with minimal borders"""
+        plt.ioff()
+        word_images = []
+        for word in word_list:
+            fig, ax = plt.subplots(constrained_layout=True)
+            text = ax.text(
+                0.5,
+                0.5,
+                word,
+                ha="center",
+                va="center",
+                fontsize=word_size,
+                bbox=dict(boxstyle="square,pad=0", ec="none", clip_on=True),
+                clip_on=True,
+            )
+            ax.axis("off")
+            fig.canvas.draw()
+
+            # crop the word
+            xmin = text.get_window_extent().xmin
+            xmax = text.get_window_extent().xmax
+            ymin = text.get_window_extent().ymin
+            ymax = text.get_window_extent().ymax
+            cropped_word = np.array(fig.canvas.renderer.buffer_rgba())[
+                int(ymin) : int(ymax), int(xmin) : int(xmax)
+            ]
+
+            # binarize and save
+            binarized_image = (cropped_word[:, :, 0] > 0) * self.background
+            binarized_image[binarized_image == 0] = 255
+            word_images.append(binarized_image)
+
+        plt.ion()
+        plt.close("all")
+        return word_images
