@@ -169,11 +169,11 @@ class Stimulus:
         self.__dict__ = pickle.loads(dataPickle)
 
     def flickeringStim(self, compress=False):
-        """create flickering checkerboard stimulus from binary stimulus mask"""
-
+        """Create flickering stimulus with cleaner structure."""
         if self._stimSize < 512:
-            print("You should consider going for higher resolution. e.g. 1024x1024")
+            print("Consider using a higher resolution, e.g. 1024x1024")
 
+        # Load carrier images or generate checkerboard pattern.
         if self._carrier == "checker":
             self._checkerboard()
         elif self._carrier == "images":
@@ -181,113 +181,129 @@ class Stimulus:
         else:
             Warning(f"Invalid carrier {self._carrier}, choose from [checker, images]!")
 
+        framesPerPos, nF = self._calculate_frames()
+
+        self._init_flickerStim(nF, framesPerPos)
+
+        if self._carrier == "checker":
+            self._apply_checker_flicker(nF, framesPerPos)
+        elif self._carrier == "images":
+            self._apply_image_flicker(nF, framesPerPos)
+
+        if compress:
+            self._compress_stimulus()
+        else:
+            self._set_flicker_sequence(nF, framesPerPos)
+
+    def _calculate_frames(self):
+        """Calculate frames per position and total frame count."""
         if not self.continous:
             framesPerPos = int(np.round(self.TR * self.flickerFrequency + 1e-4))
             nF = self.nFrames
-
         else:
             framesPerPos = int(
                 np.round(self.TR / self.frameMultiplier * self.flickerFrequency + 1e-4)
             )
             nF = self.nContinousFrames
-
         if framesPerPos == 0:
+            print("Invalid configuration: framesPerPos computed as 0.")
             print(
                 f"continous_multiplier ({self.frameMultiplier / self.TR}) is not allowed to be greater than flickerFrequency ({self.flickerFrequency})"
             )
+        return framesPerPos, nF
 
+    def _init_flickerStim(self, nF, framesPerPos):
+        """Initialize flickering stimulus and sequence timing arrays."""
         self._flickerUncStim = (
             np.ones((self._stimSize, self._stimSize, nF * framesPerPos)) * 128
         )
-
         self._flickerSeqTimeing = np.arange(
             0, self._stimUnc.shape[0] * self.TR, 1 / self.flickerFrequency
         )
 
-        if self._carrier == "checker":
-            running_counter = 0
-            for i in range(nF):
-                for j in range(framesPerPos):
-                    if self._stimBase[i] == 1:
-                        checkOne = self.checkA
-                        checkTwo = self.checkB
-                    elif self._stimBase[i] == 2:
-                        checkOne = self.checkC
-                        checkTwo = self.checkD
-
-                    if np.mod(running_counter, 2) == 0:
-                        self._flickerUncStim[..., framesPerPos * i + j][
-                            self._stimUnc[i, ...].astype(bool)
-                        ] = checkOne[self._stimUnc[i, ...].astype(bool)]
-                    elif np.mod(running_counter, 2) == 1:
-                        self._flickerUncStim[..., framesPerPos * i + j][
-                            self._stimUnc[i, ...].astype(bool)
-                        ] = checkTwo[self._stimUnc[i, ...].astype(bool)]
-                    running_counter += 1
-
-        elif self._carrier == "images":
-            for i in range(nF):
-                for j in range(framesPerPos):
-                    self._flickerUncStim[..., framesPerPos * i + j][
-                        self._stimUnc[i, ...].astype(bool)
-                    ] = self.carrierImages[
-                        self._stimUnc[i, ...].astype(bool),
-                        randint(self.carrierImages.shape[-1]),
-                    ]
-
-        if compress:
-            print("Compressing stimulus, this may take some time...")
-            # get only the unique images to compress the output mat file
-            self._flickerUncStim, self._flickerSeq = np.unique(
-                self._flickerUncStim, axis=-1, return_inverse=True
-            )
-
-            # swap the empty image to the first position
-            swap = self._flickerSeq[-1]
-
-            a, b = deepcopy(self._flickerUncStim[..., swap]), deepcopy(
-                self._flickerUncStim[..., 0]
-            )
-            self._flickerUncStim[..., 0], self._flickerUncStim[..., swap] = a, b
-
-            self._flickerSeq[self._flickerSeq == swap] = -1
-            self._flickerSeq[self._flickerSeq == 0] = swap
-            self._flickerSeq[self._flickerSeq == -1] = 0
-
+    def _get_checker_values(self, stim_val):
+        if stim_val == 1:
+            return self.checkA, self.checkB
+        elif stim_val == 2:
+            return self.checkC, self.checkD
         else:
-            self._flickerSeq = np.zeros(nF * framesPerPos, dtype=int)
-            for i in range(nF):
-                for j in range(framesPerPos):
-                    self._flickerSeq[i * framesPerPos + j] = 2 * i + np.mod(j, 2)
+            return None, None
 
-    def saveMrVistaStimulus(self, oName, triggerKey="6", compress=True):
-        """save the created stimulus as mrVista _images and _params to present it at the scanner"""
+    def _apply_checker_flicker(self, nF, framesPerPos):
+        """Apply flicker pattern for checkerboard stimuli."""
+        running_counter = 0
+        for i in range(nF):
+            mask = self._stimUnc[i, ...].astype(bool)
+            checkOne, checkTwo = self._get_checker_values(self._stimBase[i])
 
-        if not hasattr(self, "_flickerSeq"):
-            self.flickeringStim(compress=True)
+            for j in range(framesPerPos):
+                idx = framesPerPos * i + j
+                if running_counter % 2 == 0:
+                    if checkOne is not None:
+                        self._flickerUncStim[..., idx][mask] = checkOne[mask]
+                else:
+                    if checkTwo is not None:
+                        self._flickerUncStim[..., idx][mask] = checkTwo[mask]
+                running_counter += 1
 
-        self.fixSeq = np.zeros(len(self._flickerSeq))
-        chunckSize = 9
+    def _apply_image_flicker(self, nF, framesPerPos):
+        """Apply flicker pattern for image-based stimuli."""
+        for i in range(nF):
+            mask = self._stimUnc[i, ...].astype(bool)
+            for j in range(framesPerPos):
+                idx = framesPerPos * i + j
+                rand_idx = randint(self.carrierImages.shape[-1])
+                self._flickerUncStim[..., idx][mask] = self.carrierImages[
+                    mask, rand_idx
+                ]
+
+    def _compress_stimulus(self):
+        """Compress the stimulus output."""
+        print("Compressing stimulus, this may take some time...")
+        self._flickerUncStim, self._flickerSeq = np.unique(
+            self._flickerUncStim, axis=-1, return_inverse=True
+        )
+        # Move the empty image to the first position.
+        swap = self._flickerSeq[-1]
+        a = deepcopy(self._flickerUncStim[..., swap])
+        b = deepcopy(self._flickerUncStim[..., 0])
+        self._flickerUncStim[..., 0], self._flickerUncStim[..., swap] = a, b
+        self._flickerSeq[self._flickerSeq == swap] = -1
+        self._flickerSeq[self._flickerSeq == 0] = swap
+        self._flickerSeq[self._flickerSeq == -1] = 0
+
+    def _set_flicker_sequence(self, nF, framesPerPos):
+        """Set the flicker sequence if compression is not applied."""
+        self._flickerSeq = np.zeros(nF * framesPerPos, dtype=int)
+        for i in range(nF):
+            for j in range(framesPerPos):
+                self._flickerSeq[i * framesPerPos + j] = 2 * i + (j % 2)
+
+    def _create_fixation_sequence(self, seq_length, chunkSize=9):
+        """Create the fixation sequence based on the flicker sequence length."""
+        fixSeq = np.zeros(seq_length)
         colour = 1 if np.random.rand() > 0.5 else 2
         i = 0
-        while i < len(self._flickerSeq):
-            self.fixSeq[i : i + chunckSize] = colour
-            if self.fixSeq[i - 1] != self.fixSeq[i]:
-                self.fixSeq[i : i + 4 * chunckSize] = colour
-                i += 4 * chunckSize
+        while i < seq_length:
+            fixSeq[i : i + chunkSize] = colour
+            if i > 0 and fixSeq[i - 1] != fixSeq[i]:
+                fixSeq[i : i + 4 * chunkSize] = colour
+                i += 4 * chunkSize
             else:
                 if np.random.rand() < 0.4:
                     colour = 1 if colour == 2 else 2
-                i += chunckSize
+                i += chunkSize
+        return fixSeq.astype("uint8")
 
+    def _prepare_output(self):
+        """Prepare output dictionaries for saving stimulus."""
         oStim = {
             "images": np.uint8(self.flickerUncStim),
             "seq": np.uint16(self._flickerSeq + 1),
             "seqtiming": np.float64(self._flickerSeqTimeing),
-            "cmap": np.vstack((aa := np.linspace(0, 1, 256), aa, aa)).T,
-            "fixSeq": self.fixSeq.astype("uint8"),
+            "cmap": np.vstack((np.linspace(0, 1, 256),) * 3).T,
+            "fixSeq": self.fixSeq,
         }
-
         oPara = {
             "experiment": "experiment from file",
             "fixation": "disk",
@@ -312,10 +328,8 @@ class Stimulus:
             "countdown": np.float64(0),
             "startScan": np.float64(0),
         }
-
         if hasattr(self, "_onsets"):
             oPara["onsets"] = self._onsets
-
         if self.stimulus_type == "bar":
             oPara["barWidthDeg"] = np.float64(
                 np.round(self.bar_width / self._stimSize * self._maxEcc * 2, 2)
@@ -324,18 +338,25 @@ class Stimulus:
                 oPara["checkerSize"] = np.float64(
                     np.round(self.checkSize / self._stimSize * self._maxEcc, 2)
                 )
+        return oStim, oPara
 
+    def saveMrVistaStimulus(self, oName, triggerKey="6", compress=True):
+        """
+        Save the created stimulus as mrVista _images and _params to present it at the scanner.
+        """
+        if not hasattr(self, "_flickerSeq"):
+            self.flickeringStim(compress=True)
+
+        self.fixSeq = self._create_fixation_sequence(len(self._flickerSeq))
+        oStim, oPara = self._prepare_output()
         oMat = {
             "stimulus": oStim,
             "params": oPara,
         }
 
-        # if "/" not in oName:
-        # savemat(os.path.join("/home_local/dlinhardt/Dropbox/measurementlaptop/images", oName), oMat)
-        # else:
         print(f"Saving {oName}... ")
         savemat(oName, oMat, do_compression=True)
-        print(f"saved.")
+        print("saved.")
 
     def playVid(self, z=None, flicker=False):
         """play the stimulus video, if not defined otherwise, the unconvolved stimulus"""

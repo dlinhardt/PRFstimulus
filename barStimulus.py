@@ -25,6 +25,7 @@ class barStimulus(Stimulus):
         continous_multiplier=2,
         startingDirection=[0, 3, 6, 1, 4, 7, 2, 5],
     ):
+        # Initialize common parameters from parent
         super().__init__(
             stimSize,
             maxEcc,
@@ -36,26 +37,50 @@ class barStimulus(Stimulus):
             continous=continous,
         )
         self.stimulus_type = "bar"
-
         self.startingDirection = startingDirection
-
         self.nBars = nBars
         self.doubleBarRot = doubleBarRot
         self.thickRatio = thickRatio
-
         self.forceBarWidth = forceBarWidth
 
         self.crossings = len(self.startingDirection)
         self.nBlanks = 4
 
-        self.framesPerCrossing = int(
-            (self.nFrames - self.nBlanks * self.blankLength) / self.crossings
+        # Compute frames per crossing and bar width parameters
+        self.framesPerCrossing = self._compute_frames_per_crossing(
+            continous, blank_duration
         )
+        self._compute_bar_width(overlap)
 
+        if not continous:
+            self.continous = False
+            self._init_non_continuous()
+        else:
+            self.continous = True
+            self.frameMultiplier = self.TR * continous_multiplier
+            self.nContinousFrames = int(self.nFrames * self.frameMultiplier)
+            self.continousBlankLength = int(blank_duration * self.frameMultiplier)
+            # Recompute framesPerCrossing using continuous parameters
+            self.framesPerCrossing = self._compute_frames_per_crossing(
+                continous, blank_duration
+            )
+            self._init_continuous()
+
+    def _compute_frames_per_crossing(self, continous, blank_duration):
+        if not continous:
+            return int(
+                (self.nFrames - self.nBlanks * self.blankLength) / self.crossings
+            )
+        else:
+            return int(
+                (self.nContinousFrames - 4 * self.continousBlankLength) / self.crossings
+            )
+
+    def _compute_bar_width(self, overlap):
         if self.forceBarWidth is not None:
             forceBarWidthPix = np.ceil(
                 self.forceBarWidth / (2 * self._maxEcc) * self._stimSize
-            ).astype("int")
+            ).astype(int)
             self.bar_width = forceBarWidthPix
             self.overlap = (self._stimSize + 0.5) / (
                 self.bar_width * self.framesPerCrossing
@@ -64,249 +89,214 @@ class barStimulus(Stimulus):
             self.overlap = overlap
             self.bar_width = np.ceil(
                 self._stimSize / (self.framesPerCrossing * self.overlap - 0.5)
-            ).astype("int")
+            ).astype(int)
 
-        if not continous:
-            self.continous = False
-            self._stimRaw = np.zeros((self.nFrames, self._stimSize, self._stimSize))
-            self._stimBase = np.zeros(self.nFrames)  # to find which checkerboard to use
+    def _init_non_continuous(self):
+        self._stimRaw = np.zeros((self.nFrames, self._stimSize, self._stimSize))
+        self._stimBase = np.zeros(
+            self.nFrames
+        )  # to determine which checker pattern to use
+        self.jump_size = self.overlap * self.bar_width
 
-            self.jump_size = self.overlap * self.bar_width
+        it = 0
+        for cross in self.startingDirection:
+            for i in range(self.framesPerCrossing):
+                frame = np.zeros((self._stimSize, self._stimSize))
+                start = max(0, int(self.jump_size * (i - 1)))
+                end = min(
+                    self._stimSize, int(self.jump_size * (i - 1) + self.bar_width)
+                )
+                frame[:, start:end] = 1
 
-            it = 0
-            for cross in self.startingDirection:
-                for i in range(self.framesPerCrossing):
-                    frame = np.zeros((self._stimSize, self._stimSize))
-                    frame[
-                        :,
-                        max(0, int(self.jump_size * (i - 1))) : min(
-                            self._stimSize,
-                            int(self.jump_size * (i - 1) + self.bar_width),
-                        ),
-                    ] = 1
+                if self.nBars > 1:
+                    frame = self._apply_multiple_bars(frame, i)
 
-                    if self.nBars > 1:
-                        self.nBarShift = self._stimSize // self.nBars
-                        frame2 = np.zeros((self._stimSize, self._stimSize))
-                        frame3 = np.zeros((self._stimSize, self._stimSize))
+                rotated_frame = skiT.rotate(
+                    frame, cross * 360 / self.crossings, order=0
+                )
+                self._stimRaw[it, ...] = rotated_frame
+                self._stimBase[it] = np.mod(cross, 2) + 1
+                it += 1
+            if cross % 2 != 0:
+                it += self.blankLength
 
-                        for nbar in range(self.nBars - 1):
-                            if i == 0:
-                                o = max(
-                                    int(np.ceil(self._stimSize / 2 - 1)),
-                                    int(
-                                        self.jump_size * (i - 1)
-                                        + self.bar_width * self.thickRatio * 0.55
-                                        + self.nBarShift * (nbar + 1)
-                                    ),
-                                )
-                                t = int(
-                                    self.jump_size * (i - 1)
-                                    + self.bar_width * self.thickRatio
-                                    + self.nBarShift * (nbar + 1)
-                                )
-                            elif i == self.framesPerCrossing - 1:
-                                o = int(
-                                    self.jump_size * (i - 1)
-                                    + self.nBarShift * (nbar + 1)
-                                )
-                                t = int(
-                                    self.jump_size * (i - 1)
-                                    + self.bar_width * self.thickRatio * 0.45
-                                    + self.nBarShift * (nbar + 1)
-                                )
-                            else:
-                                o = int(
-                                    self.jump_size * (i - 1)
-                                    + self.nBarShift * (nbar + 1)
-                                )
-                                t = int(
-                                    self.jump_size * (i - 1)
-                                    + self.bar_width * self.thickRatio
-                                    + self.nBarShift * (nbar + 1)
-                                )
+        self._create_mask(self._stimRaw.shape)
+        self._stimUnc = np.zeros(self._stimRaw.shape)
+        self._stimUnc[:, self._stimMask] = self._stimRaw[:, self._stimMask]
 
-                            frame2[:, max(0, o) : min(self._stimSize, t)] = 1
-                            frame3[
-                                :,
-                                max(0, o - self._stimSize) : max(
-                                    0,
-                                    min(
-                                        int(np.floor(self._stimSize / 2)),
-                                        min(self._stimSize, t - self._stimSize),
-                                    ),
-                                ),
-                            ] = 1
+    def _init_continuous(self):
+        self._stimRaw = np.zeros(
+            (self.nContinousFrames, self._stimSize, self._stimSize)
+        )
+        self._stimBase = np.zeros(self.nContinousFrames)
+        self.jump_size = self.overlap * self.bar_width / self.frameMultiplier
 
-                            frame2 = skiT.rotate(frame2, self.doubleBarRot, order=0)
-                            frame3 = skiT.rotate(frame3, self.doubleBarRot, order=0)
-                            frame = np.any(np.stack((frame, frame2, frame3), 2), 2)
+        it = 0
+        for cross in self.startingDirection:
+            for i in range(self.framesPerCrossing):
+                frame = np.zeros((self._stimSize, self._stimSize))
+                start = max(0, int(self.jump_size * (i - self.frameMultiplier)))
+                end = min(
+                    self._stimSize,
+                    int(self.jump_size * (i - self.frameMultiplier) + self.bar_width),
+                )
+                frame[:, start:end] = 1
+                rotated_frame = skiT.rotate(
+                    frame, cross * 360 / self.crossings, order=0
+                )
+                self._stimRaw[it, ...] = rotated_frame
+                self._stimBase[it] = np.mod(cross, 2) + 1
+                it += 1
+            if cross % 2 != 0:
+                it += self.continousBlankLength
 
-                    self._stimRaw[it, ...] = skiT.rotate(
-                        frame, cross * 360 / self.crossings, order=0
-                    )
+        self._create_mask(self._stimRaw.shape)
+        self._stimUnc = np.zeros(self._stimRaw.shape)
+        self._stimUnc[:, self._stimMask] = self._stimRaw[:, self._stimMask]
 
-                    self._stimBase[it] = np.mod(cross, 2) + 1
+    def _apply_multiple_bars(self, frame, i):
+        """Helper to modify frame when multiple bars are used."""
+        self.nBarShift = self._stimSize // self.nBars
+        frame2 = np.zeros((self._stimSize, self._stimSize))
+        frame3 = np.zeros((self._stimSize, self._stimSize))
 
-                    it += 1
+        for nbar in range(self.nBars - 1):
+            if i == 0:
+                o = max(
+                    int(np.ceil(self._stimSize / 2 - 1)),
+                    int(
+                        self.jump_size * (i - 1)
+                        + self.bar_width * self.thickRatio * 0.55
+                        + self.nBarShift * (nbar + 1)
+                    ),
+                )
+                t = int(
+                    self.jump_size * (i - 1)
+                    + self.bar_width * self.thickRatio
+                    + self.nBarShift * (nbar + 1)
+                )
+            elif i == self.framesPerCrossing - 1:
+                o = int(self.jump_size * (i - 1) + self.nBarShift * (nbar + 1))
+                t = int(
+                    self.jump_size * (i - 1)
+                    + self.bar_width * self.thickRatio * 0.45
+                    + self.nBarShift * (nbar + 1)
+                )
+            else:
+                o = int(self.jump_size * (i - 1) + self.nBarShift * (nbar + 1))
+                t = int(
+                    self.jump_size * (i - 1)
+                    + self.bar_width * self.thickRatio
+                    + self.nBarShift * (nbar + 1)
+                )
 
-                if cross % 2 != 0:
-                    it += self.blankLength
-
-            self._create_mask(self._stimRaw.shape)
-
-            self._stimUnc = np.zeros(self._stimRaw.shape)
-            self._stimUnc[:, self._stimMask] = self._stimRaw[:, self._stimMask]
-
-        else:
-            self.continous = True
-            self.frameMultiplier = self.TR * continous_multiplier
-            self.nContinousFrames = int(self.nFrames * self.frameMultiplier)
-            self.continousBlankLength = int(blank_duration * self.frameMultiplier)
-            self.framesPerCrossing = int(
-                (self.nContinousFrames - 4 * self.continousBlankLength) / self.crossings
-            )
-
-            self._stimRaw = np.zeros(
-                (self.nContinousFrames, self._stimSize, self._stimSize)
-            )
-            self._stimBase = np.zeros(
-                self.nContinousFrames
-            )  # to find which checkerboard to use
-
-            self.jump_size = self.overlap * self.bar_width / self.frameMultiplier
-
-            it = 0
-            for cross in self.startingDirection:
-                for i in range(self.framesPerCrossing):
-                    frame = np.zeros((self._stimSize, self._stimSize))
-                    frame[
-                        :,
-                        max(
-                            0,
-                            int(self.jump_size * (i - self.frameMultiplier)),
-                        ) : min(
-                            self._stimSize,
-                            int(
-                                self.jump_size * (i - self.frameMultiplier)
-                                + self.bar_width
-                            ),
-                        ),
-                    ] = 1
-
-                    # if self.nBars > 1:
-                    #     self.nBarShift = self._stimSize // self.nBars
-                    #     frame2 = np.zeros((self._stimSize,self._stimSize))
-
-                    #     for nbar in range(self.nBars-1) :
-                    #         o = int(self.overlap*self.bar_width*(i-1) + self.nBarShift*(nbar+1))
-                    #         t = int(self.overlap*self.bar_width*(i-1) + self.bar_width*self.thickRatio + self.nBarShift*(nbar+1))
-                    #         if o>self._stimSize: o -= self._stimSize
-                    #         if t>self._stimSize: t -= self._stimSize
-                    #         frame2[:, max(0, o):min(self._stimSize, t)] = 1
-                    #         frame2 = skiT.rotate(frame2, self.doubleBarRot, order=0)
-                    #         frame = np.any(np.stack((frame,frame2), 2), 2)
-
-                    self._stimRaw[it, ...] = skiT.rotate(
-                        frame, cross * 360 / self.crossings, order=0
-                    )
-
-                    self._stimBase[it] = np.mod(cross, 2) + 1
-
-                    it += 1
-
-                if cross % 2 != 0:
-                    it += self.continousBlankLength
-
-            self._create_mask(self._stimRaw.shape)
-
-            self._stimUnc = np.zeros(self._stimRaw.shape)
-            self._stimUnc[:, self._stimMask] = self._stimRaw[:, self._stimMask]
+            frame2[:, max(0, o) : min(self._stimSize, t)] = 1
+            frame3[
+                :,
+                max(0, o - self._stimSize) : max(
+                    0,
+                    min(
+                        int(np.floor(self._stimSize / 2)),
+                        min(self._stimSize, t - self._stimSize),
+                    ),
+                ),
+            ] = 1
+            frame2 = skiT.rotate(frame2, self.doubleBarRot, order=0)
+            frame3 = skiT.rotate(frame3, self.doubleBarRot, order=0)
+            frame = np.any(np.stack((frame, frame2, frame3), axis=2), axis=2)
+        return frame
 
     def _checkerboard(self, nChecks=10):
-        """create the four flickering main images"""
+        """Create the four flickering main images for the stimulus."""
+        self._compute_check_parameters(nChecks)
 
-        # we want at least 1.5 checkers per bar width
+        # Define cropping slices for two sets of images
+        crop_main = (
+            int(self.checkSize * 3 / 2),
+            -int(self.checkSize / 2),
+            int(self.checkSize / 2),
+            -int(self.checkSize * 3 / 2),
+        )
+        crop_rotated = (
+            self.checkSize,
+            -self.checkSize,
+            self.checkSize,
+            -self.checkSize,
+        )
+
+        # Create basic patterns using np.tile for clarity.
+        patternA = np.tile([[0, 255], [255, 0]], (self.nChecks + 1, self.nChecks + 1))
+        patternB = np.tile([[255, 0], [0, 255]], (self.nChecks + 1, self.nChecks + 1))
+
+        # Generate and crop checkA and checkB
+        self.checkA = self._generate_and_crop(patternA, crop_main)
+        self.checkB = self._generate_and_crop(patternB, crop_main)
+
+        # Generate rotated versions for checkC and checkD using skimage.transform.rotate
+        rotatedA = skiT.rotate(
+            np.kron(patternA, np.ones((self.checkSize, self.checkSize))),
+            angle=45,
+            resize=False,
+            order=0,
+        )
+        rotatedB = skiT.rotate(
+            np.kron(patternB, np.ones((self.checkSize, self.checkSize))),
+            angle=45,
+            resize=False,
+            order=0,
+        )
+        self.checkC = np.where(rotatedA < 128, 0, 255)[
+            crop_rotated[0] : crop_rotated[1], crop_rotated[2] : crop_rotated[3]
+        ]
+        self.checkD = np.where(rotatedB < 128, 0, 255)[
+            crop_rotated[0] : crop_rotated[1], crop_rotated[2] : crop_rotated[3]
+        ]
+
+        # Ensure the computed check images match the stimulus size
+        self.checkA = self._crop_to_stimSize(self.checkA)
+        self.checkB = self._crop_to_stimSize(self.checkB)
+        self.checkC = self._crop_to_stimSize(self.checkC)
+        self.checkD = self._crop_to_stimSize(self.checkD)
+
+    def _compute_check_parameters(self, nChecks):
+        """Compute checkSize and nChecks based on stimulus size and bar width."""
         if hasattr(self, "bar_width"):
-            self.checkSize = np.min(
-                (
-                    np.ceil(self._stimSize / nChecks / 2).astype(int),
-                    np.ceil(self.bar_width / 1.5),
+            self.checkSize = int(
+                np.min(
+                    (
+                        np.ceil(self._stimSize / nChecks / 2).astype(int),
+                        np.ceil(self.bar_width / 1.5),
+                    )
                 )
-            ).astype(int)
-            self.nChecks = np.ceil(self._stimSize / self.checkSize / 2).astype(int)
+            )
+            self.nChecks = int(np.ceil(self._stimSize / self.checkSize / 2))
         else:
-            self.checkSize = np.ceil(self._stimSize / nChecks / 2).astype(int)
+            self.checkSize = int(np.ceil(self._stimSize / nChecks / 2))
             self.nChecks = nChecks
 
-        self.checkA = np.kron(
-            [[0, 255] * (self.nChecks + 1), [255, 0] * (self.nChecks + 1)]
-            * (self.nChecks + 1),
-            np.ones((self.checkSize, self.checkSize)),
-        )[
-            int(self.checkSize * 3 / 2) : -int(self.checkSize / 2),
-            int(self.checkSize / 2) : -int(self.checkSize * 3 / 2),
-        ]
-        self.checkB = np.kron(
-            [[255, 0] * (self.nChecks + 1), [0, 255] * (self.nChecks + 1)]
-            * (self.nChecks + 1),
-            np.ones((self.checkSize, self.checkSize)),
-        )[
-            int(self.checkSize * 3 / 2) : -int(self.checkSize / 2),
-            int(self.checkSize / 2) : -int(self.checkSize * 3 / 2),
-        ]
+    def _generate_and_crop(self, pattern, crop):
+        """
+        Generate a checker image using np.kron and crop it.
 
-        self.checkC = np.where(
-            skiT.rotate(
-                np.kron(
-                    [[0, 255] * (self.nChecks + 1), [255, 0] * (self.nChecks + 1)]
-                    * (self.nChecks + 1),
-                    np.ones((self.checkSize, self.checkSize)),
-                ),
-                angle=45,
-                resize=False,
-                order=0,
-            )
-            < 128,
-            0,
-            255,
-        )[self.checkSize : -self.checkSize, self.checkSize : -self.checkSize]
-        self.checkD = np.where(
-            skiT.rotate(
-                np.kron(
-                    [[255, 0] * (self.nChecks + 1), [0, 255] * (self.nChecks + 1)]
-                    * (self.nChecks + 1),
-                    np.ones((self.checkSize, self.checkSize)),
-                ),
-                angle=45,
-                resize=False,
-                order=0,
-            )
-            < 128,
-            0,
-            255,
-        )[self.checkSize : -self.checkSize, self.checkSize : -self.checkSize]
+        crop: tuple (top, bottom, left, right) used as slice indices.
+        """
+        board = np.kron(pattern, np.ones((self.checkSize, self.checkSize)))
+        return board[crop[0] : crop[1], crop[2] : crop[3]]
 
-        if self.checkA.shape[0] != self._stimSize:
-            diff = (self.checkA.shape[0] - self._stimSize) / 2
-            self.checkA = self.checkA[
-                np.floor(diff).astype("int") : -np.ceil(diff).astype("int"),
-                np.floor(diff).astype("int") : -np.ceil(diff).astype("int"),
+    def _crop_to_stimSize(self, img):
+        """
+        Crop the image to match the stimulus size.
+
+        If the image dimensions do not match self._stimSize, the image is cropped equally
+        from all sides.
+        """
+        if img.shape[0] != self._stimSize:
+            diff = (img.shape[0] - self._stimSize) / 2
+            img = img[
+                np.ceil(diff).astype(int) : img.shape[0] - np.floor(diff).astype(int),
+                np.ceil(diff).astype(int) : img.shape[1] - np.floor(diff).astype(int),
             ]
-            self.checkB = self.checkB[
-                np.floor(diff).astype("int") : -np.ceil(diff).astype("int"),
-                np.floor(diff).astype("int") : -np.ceil(diff).astype("int"),
-            ]
-        if self.checkC.shape[0] != self._stimSize:
-            diff = (self.checkC.shape[0] - self._stimSize) / 2
-            self.checkC = self.checkC[
-                np.floor(diff).astype("int") : -np.ceil(diff).astype("int"),
-                np.floor(diff).astype("int") : -np.ceil(diff).astype("int"),
-            ]
-            self.checkD = self.checkD[
-                np.floor(diff).astype("int") : -np.ceil(diff).astype("int"),
-                np.floor(diff).astype("int") : -np.ceil(diff).astype("int"),
-            ]
+        return img
 
     def stimulus_length(self):
         super().stimulus_length()
