@@ -714,8 +714,10 @@ class Stimulus:
             word_images1 = self._create_word_images(word_list[0], word_size)
             word_images2 = self._create_word_images(word_list[1], word_size)
             self._word_images = (word_images1, word_images2)
+            self._multiple_word_lists = True
         else:
             self._word_images = self._create_word_images(word_list, word_size)
+            self._multiple_word_lists = False
 
         # Keep a copy of the original stimulus
         self._stimUncOrig = deepcopy(self._stimUnc)
@@ -740,7 +742,8 @@ class Stimulus:
         'stim_length' should be a scalar (in seconds). For each block, if multiple word lists
         were provided, a random list is chosen once for the entire block.
         """
-        print("WARNING: we only can do two word lists at the moment")
+        if self._multiple_word_lists:
+            print("WARNING: we can only do two word lists at the moment")
 
         if not hasattr(onsets, "__len__"):
             Warning("Please provide onsets as a list!")
@@ -752,8 +755,11 @@ class Stimulus:
         total_frames = self._flickerUncStim.shape[-1]
 
         block_indices = np.zeros(len(onsets)).astype(np.int64)
-        block_indices[: block_indices.size // 2] = 1
-        np.random.shuffle(block_indices)
+        if self._multiple_word_lists:
+            block_indices[: block_indices.size // 2] = 1
+            np.random.shuffle(block_indices)
+        else:
+            self._word_images = [self._word_images]
 
         # save onsets and shuffle for housekeeping
         self._onsets = onsets
