@@ -354,6 +354,8 @@ class Stimulus:
         }
         if hasattr(self, "_onsets"):
             oPara["onsets"] = self._onsets
+        if hasattr(self, "_regressors"):
+            oPara["regressors"] = self._regressors
         if self.stimulus_type == "bar":
             oPara["barWidthDeg"] = np.float64(
                 np.round(self.bar_width / self._stimSize * self._maxEcc * 2, 2)
@@ -388,7 +390,7 @@ class Stimulus:
         """play the stimulus video, if not defined otherwise, the unconvolved stimulus"""
 
         if flicker:
-            if not hasattr(self, "_flickerUncSeq"):
+            if not hasattr(self, "_flickerSeq"):
                 self.flickeringStim(compress=True, gpu=gpu)
 
             plt.figure(constrained_layout=True)
@@ -705,8 +707,15 @@ class Stimulus:
         self, word_list, word_size, paradigm, onsets=None, stim_length=None
     ):
         """Create a stimulus with a word in the center"""
-        # create the list of words as images
-        self._word_images = self._create_word_images(word_list, word_size)
+        # Process word_list: create word images.
+        if isinstance(word_list, tuple) and len(word_list) == 2:
+            if paradigm == "continous":
+                Warning("Please provide only one word_list for continous paradigm!")
+            word_images1 = self._create_word_images(word_list[0], word_size)
+            word_images2 = self._create_word_images(word_list[1], word_size)
+            self._word_images = (word_images1, word_images2)
+        else:
+            self._word_images = self._create_word_images(word_list, word_size)
 
         # Keep a copy of the original stimulus
         self._stimUncOrig = deepcopy(self._stimUnc)
@@ -725,30 +734,49 @@ class Stimulus:
             Warning(f"Chose the paradigm from [block, continous]!")
 
     def _block_words(self, onsets, stim_length):
-        """onsets define the start of each block in seconds, stim_length the length of each block in seconds"""
-        # re-calculate the onsets and stim_length to frames
+        """Insert a word in center for blocks defined by onsets and stimulus length.
+
+        'onsets' should be provided in seconds as a list.
+        'stim_length' should be a scalar (in seconds). For each block, if multiple word lists
+        were provided, a random list is chosen once for the entire block.
+        """
+        print("WARNING: we only can do two word lists at the moment")
+
         if not hasattr(onsets, "__len__"):
-            Warning("Please provide onsets as list!")
+            Warning("Please provide onsets as a list!")
         if hasattr(stim_length, "__len__"):
-            Warning("Please provide stim_length as scalar!")
+            Warning("Please provide stim_length as a scalar!")
 
-        onsets = np.array(onsets) * self.flickerFrequency
-        stim_length = stim_length * self.flickerFrequency
-
+        onsets_frames = np.array(sorted(onsets)) * self.flickerFrequency
+        stim_length_frames = stim_length * self.flickerFrequency
         total_frames = self._flickerUncStim.shape[-1]
-        for i in range(total_frames):
-            # Select a random word only every third frame
-            if i % 4 == 0:
-                selected_word = self._word_images[randint(len(self._word_images))]
-            # only add words after onset for stim_length frames and when frame index mod 4 != 3
-            if (
-                np.any(i >= onsets)
-                and np.any(i < onsets + stim_length)
-                and (i % 4 != 3)
-            ):
-                self._flickerUncStim[..., i] = self._add_word(
-                    self._flickerUncStim[..., i], selected_word
-                )
+
+        block_indices = np.zeros(len(onsets)).astype(np.int64)
+        block_indices[: block_indices.size // 2] = 1
+        np.random.shuffle(block_indices)
+
+        # save onsets and shuffle for housekeeping
+        self._onsets = onsets
+        self._regressors = block_indices
+
+        # Process each block.
+        for onsetI, onset in enumerate(onsets_frames):
+            block_start = int(onset)
+            block_end = int(onset + stim_length_frames)
+            # If multiple word lists were provided, choose one list once per block.
+            selected_list = self._word_images[block_indices[onsetI]]
+
+            # Process frames in the block in groups of 4.
+            for i in range(block_start, min(block_end, total_frames)):
+                relative_idx = i - block_start
+                # At the start of each 4-frame group choose a new word.
+                if relative_idx % 4 == 0:
+                    group_word = selected_list[randint(len(selected_list))]
+                # Skip adding a word in the fourth frame of each group.
+                if relative_idx % 4 != 3:
+                    self._flickerUncStim[..., i] = self._add_word(
+                        self._flickerUncStim[..., i], group_word
+                    )
 
     def _continous_words(self):
         """show words whenever a bar is present"""
