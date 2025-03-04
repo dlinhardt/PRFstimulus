@@ -364,6 +364,9 @@ class Stimulus:
                 oPara["checkerSize"] = np.float64(
                     np.round(self.checkSize / self._stimSize * self._maxEcc, 2)
                 )
+        if hasattr(self, "_chosen_words"):
+            oPara["chosen_words"] = self._chosen_words
+
         return oStim, oPara
 
     def saveMrVistaStimulus(self, oName, triggerKey="6", gpu=False):
@@ -724,6 +727,9 @@ class Stimulus:
         if not hasattr(self, "_flickerUncStim"):
             self.flickeringStim(compress=False)
 
+        # create a list with all used words
+        self._chosen_words = []
+
         if paradigm == "block":
             if onsets is None or stim_length is None:
                 Warning(
@@ -777,11 +783,12 @@ class Stimulus:
                 relative_idx = i - block_start
                 # At the start of each 4-frame group choose a new word.
                 if relative_idx % 4 == 0:
-                    group_word = selected_list[randint(len(selected_list))]
+                    selected_word = selected_list[randint(len(selected_list))]
+                    self._chosen_words.append((i, selected_word))
                 # Skip adding a word in the fourth frame of each group.
                 if relative_idx % 4 != 3:
                     self._flickerUncStim[..., i] = self._add_word(
-                        self._flickerUncStim[..., i], group_word
+                        self._flickerUncStim[..., i], selected_word
                     )
 
     def _continous_words(self):
@@ -792,6 +799,7 @@ class Stimulus:
             # Select a random word only every third frame
             if i % 4 == 0:
                 selected_word = self._word_images[randint(len(self._word_images))]
+                self._chosen_words.append((i, selected_word))
             # Only add a word for nonblank frames and when frame index mod 4 != 3
             if np.unique(self._flickerUncStim[..., i]).size > 1 and (i % 4 != 3):
                 self._flickerUncStim[..., i] = self._add_word(
