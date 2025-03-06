@@ -125,7 +125,7 @@ class Stimulus:
         blank_duration=12,
         loadImages=None,
         flickerFrequency=8,
-        continous=False,
+        continuous=False,
         background=128,
     ):
         self._maxEcc = maxEcc
@@ -138,7 +138,7 @@ class Stimulus:
 
         self._is_compressed = False
 
-        self.continous = continous
+        self.continuous = continuous
 
         self.nFrames = np.ceil(stim_duration / self.TR).astype(int)
         self.blankLength = np.ceil(blank_duration / self.TR).astype(int)
@@ -148,7 +148,7 @@ class Stimulus:
         #           f'({self.nFrames*self.TR}s instead of {stim_duration}s)!')
         #     self._stim_duration = self.nFrames * self.TR
 
-        # if np.mod(blank_duration, self.TR) > 0 and not self.continous:
+        # if np.mod(blank_duration, self.TR) > 0 and not self.continuous:
         #     print(f'WARNING: blank_duration will be clipped to TR '
         #           f'({self.blankLength*self.TR}s instead of {blank_duration}s)!')
         #     self._blank_duration = self.blankLength * self.TR
@@ -204,18 +204,18 @@ class Stimulus:
 
     def _calculate_frames(self):
         """Calculate frames per position and total frame count."""
-        if not self.continous:
+        if not self.continuous:
             framesPerPos = int(np.round(self.TR * self.flickerFrequency + 1e-4))
             nF = self.nFrames
         else:
             framesPerPos = int(
                 np.round(self.TR / self.frameMultiplier * self.flickerFrequency + 1e-4)
             )
-            nF = self.nContinousFrames
+            nF = self.ncontinuousFrames
         if framesPerPos == 0:
             print("Invalid configuration: framesPerPos computed as 0.")
             print(
-                f"continous_multiplier ({self.frameMultiplier / self.TR}) is not allowed to be greater than flickerFrequency ({self.flickerFrequency})"
+                f"continuous_multiplier ({self.frameMultiplier / self.TR}) is not allowed to be greater than flickerFrequency ({self.flickerFrequency})"
             )
         return framesPerPos, nF
 
@@ -712,8 +712,8 @@ class Stimulus:
         """Create a stimulus with a word in the center"""
         # Process word_list: create word images.
         if isinstance(word_list, tuple) and len(word_list) == 2:
-            if paradigm == "continous":
-                Warning("Please provide only one word_list for continous paradigm!")
+            if paradigm == "continuous":
+                Warning("Please provide only one word_list for continuous paradigm!")
             word_images1 = self._create_word_images(word_list[0], word_size)
             word_images2 = self._create_word_images(word_list[1], word_size)
             self._word_images = (word_images1, word_images2)
@@ -736,10 +736,10 @@ class Stimulus:
                     "Please provide onsets and stim_length for block paradigm in seconds!"
                 )
             self._block_words(onsets, stim_length)
-        elif paradigm == "continous":
-            self._continous_words()
+        elif paradigm == "continuous":
+            self._continuous_words()
         else:
-            Warning(f"Chose the paradigm from [block, continous]!")
+            Warning(f"Chose the paradigm from [block, continuous]!")
 
     def _block_words(self, onsets, stim_length):
         """Insert a word in center for blocks defined by onsets and stimulus length.
@@ -791,7 +791,7 @@ class Stimulus:
                         self._flickerUncStim[..., i], selected_word
                     )
 
-    def _continous_words(self):
+    def _continuous_words(self):
         """show words whenever a bar is present"""
         # Cycle: add word for three frames, then skip one frame
         total_frames = self._flickerUncStim.shape[-1]
