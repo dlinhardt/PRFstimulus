@@ -144,12 +144,12 @@ class Stimulus:
         self.blankLength = np.ceil(blank_duration / self.TR).astype(int)
 
         # if np.mod(stim_duration, self.TR) > 0:
-        #     print(f'WARNING: stim_duration will be clipped to TR '
+        #     print(f'raise Exception: stim_duration will be clipped to TR '
         #           f'({self.nFrames*self.TR}s instead of {stim_duration}s)!')
         #     self._stim_duration = self.nFrames * self.TR
 
         # if np.mod(blank_duration, self.TR) > 0 and not self.continuous:
-        #     print(f'WARNING: blank_duration will be clipped to TR '
+        #     print(f'raise Exception: blank_duration will be clipped to TR '
         #           f'({self.blankLength*self.TR}s instead of {blank_duration}s)!')
         #     self._blank_duration = self.blankLength * self.TR
 
@@ -186,7 +186,9 @@ class Stimulus:
         elif self._carrier == "images":
             self._loadCarrierImages(self._loadImages)
         else:
-            Warning(f"Invalid carrier {self._carrier}, choose from [checker, images]!")
+            raise Exception(
+                f"Invalid carrier {self._carrier}, choose from [checker, images]!"
+            )
 
         framesPerPos, nF = self._calculate_frames()
 
@@ -613,7 +615,7 @@ class Stimulus:
                 tr - bl    3, 7
         """
         if not self.stimulus_type:
-            Warning("Only use this with bar stimuli!")
+            raise Exception("Only use this with bar stimuli!")
 
         self._stimUncOrig = deepcopy(self._stimUnc)
 
@@ -704,7 +706,7 @@ class Stimulus:
                 self.carrierImages = self.carrierImages.astype(int)
 
         else:
-            Warning("Please provide carrier images as .mat file!")
+            raise Exception("Please provide carrier images as .mat file!")
 
     def word_in_center(
         self, word_list, word_size, paradigm, onsets=None, stim_length=None
@@ -713,7 +715,9 @@ class Stimulus:
         # Process word_list: create word images.
         if isinstance(word_list, tuple) and len(word_list) == 2:
             if paradigm == "continuous":
-                Warning("Please provide only one word_list for continuous paradigm!")
+                raise Exception(
+                    "Please provide only one word_list for continuous paradigm!"
+                )
             word_images1 = self._create_word_images(word_list[0], word_size)
             word_images2 = self._create_word_images(word_list[1], word_size)
             self._word_images = (word_images1, word_images2)
@@ -732,14 +736,14 @@ class Stimulus:
 
         if paradigm == "block":
             if onsets is None or stim_length is None:
-                Warning(
+                raise Exception(
                     "Please provide onsets and stim_length for block paradigm in seconds!"
                 )
             self._block_words(onsets, stim_length)
         elif paradigm == "continuous":
             self._continuous_words()
         else:
-            Warning(f"Chose the paradigm from [block, continuous]!")
+            raise Exception(f"Chose the paradigm from [block, continuous]!")
 
     def _block_words(self, onsets, stim_length):
         """Insert a word in center for blocks defined by onsets and stimulus length.
@@ -749,12 +753,12 @@ class Stimulus:
         were provided, a random list is chosen once for the entire block.
         """
         if self._multiple_word_lists:
-            print("WARNING: we can only do two word lists at the moment")
+            print("raise Exception: we can only do two word lists at the moment")
 
         if not hasattr(onsets, "__len__"):
-            Warning("Please provide onsets as a list!")
+            raise Exception("Please provide onsets as a list!")
         if hasattr(stim_length, "__len__"):
-            Warning("Please provide stim_length as a scalar!")
+            raise Exception("Please provide stim_length as a scalar!")
 
         onsets_frames = np.array(sorted(onsets)) * self.flickerFrequency
         stim_length_frames = stim_length * self.flickerFrequency

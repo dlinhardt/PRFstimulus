@@ -30,7 +30,7 @@ class fullStimulus(Stimulus):
         self.TR = TR
         self._loadImages = loadImages
         self._carrier = "images" if self._loadImages is not None else "checker"
-        self.continous = np.mod(on_duration, TR) > 0
+        self.continuous = np.mod(on_duration, TR) > 0
 
         if nTrials is not None:
             self.nTrials = nTrials
@@ -47,7 +47,7 @@ class fullStimulus(Stimulus):
                 if len(on_duration) <= self.nTrials:
                     while not np.all([i in self.on_duration for i in on_duration]):
                         self.on_duration = np.random.choice(on_duration, self.nTrials)
-            self.continous = True
+            self.continuous = True
 
         if isinstance(off_duration, int):
             self.off_duration = [off_duration] * self.nTrials
@@ -59,7 +59,7 @@ class fullStimulus(Stimulus):
                 if len(off_duration) <= self.nTrials:
                     while not np.all([i in self.off_duration for i in off_duration]):
                         self.off_duration = np.random.choice(off_duration, self.nTrials)
-            self.continous = True
+            self.continuous = True
 
         self.stim_duration = int(sum(self.off_duration) + sum(self.on_duration))
 
@@ -70,7 +70,7 @@ class fullStimulus(Stimulus):
         self.whichCheck = whichCheck
         self.crossings = self.nTrials
         if jitter:
-            self.continous = True
+            self.continuous = True
             if isinstance(jitter, int):
                 self.jitter = jitter
             else:
@@ -80,7 +80,7 @@ class fullStimulus(Stimulus):
 
         self.min_blank = 10  # s
 
-        if not self.continous:
+        if not self.continuous:
             n_on_frames = np.round(self.on_duration / self.TR).astype(int)
             n_off_frames = np.round(self.off_duration / self.TR).astype(int)
 
@@ -91,15 +91,15 @@ class fullStimulus(Stimulus):
 
         else:
             self.frameMultiplier = self.TR * self.flickerFrequency / 2
-            # self.continousBlankLength = int(off_duration / self.TR * self.frameMultiplier)
+            # self.continuousBlankLength = int(off_duration / self.TR * self.frameMultiplier)
 
             # if not self.jitter:
-            #     off_frames = [np.zeros((self.continousBlankLength, self._stimSize, self._stimSize))] * self.nTrials
+            #     off_frames = [np.zeros((self.continuousBlankLength, self._stimSize, self._stimSize))] * self.nTrials
             # else:
             #     min_blank_cont = np.ceil(self.min_blank / self.TR * self.frameMultiplier).astype(int)
             #     jj = np.ceil(self.jitter / self.TR  * self.frameMultiplier).astype(int)
-            #     blank_length_frames = np.round(np.random.uniform(max(min_blank_cont, self.continousBlankLength - jj),
-            #                                   self.continousBlankLength + jj,
+            #     blank_length_frames = np.round(np.random.uniform(max(min_blank_cont, self.continuousBlankLength - jj),
+            #                                   self.continuousBlankLength + jj,
             #                                   self.nTrials)).astype(int)
 
             n_on_frames = np.round(
@@ -124,10 +124,10 @@ class fullStimulus(Stimulus):
             if I < self.nTrials - 1:
                 self._onsets[2 * I + 2] = self._onsets[2 * I + 1] + len(off_frame)
 
-        if self.continous:
+        if self.continuous:
             self._onsets = self._onsets * 2 / self.flickerFrequency
             ff = len(self._stimRaw)
-            self.nContinousFrames = ff
+            self.ncontinuousFrames = ff
 
         self._stimBase = np.ones(ff)  # to find which checkerboard to use
 

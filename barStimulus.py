@@ -15,14 +15,14 @@ class barStimulus(Stimulus):
         nBars=1,
         doubleBarRot=0,
         thickRatio=1,
-        continous=False,
+        continuous=False,
         TR=2,
         stim_duration=336,
         blank_duration=12,
         loadImages=None,
         flickerFrequency=8,
         forceBarWidth=None,
-        continous_multiplier=2,
+        continuous_multiplier=2,
         startingDirection=[0, 3, 6, 1, 4, 7, 2, 5],
         background=128,
     ):
@@ -35,7 +35,7 @@ class barStimulus(Stimulus):
             blank_duration=blank_duration,
             loadImages=loadImages,
             flickerFrequency=flickerFrequency,
-            continous=continous,
+            continuous=continuous,
             background=background,
         )
         self.stimulus_type = "bar"
@@ -50,32 +50,33 @@ class barStimulus(Stimulus):
 
         # Compute frames per crossing and bar width parameters
         self.framesPerCrossing = self._compute_frames_per_crossing(
-            continous, blank_duration
+            continuous, blank_duration
         )
         self._compute_bar_width(overlap)
 
-        if not continous:
-            self.continous = False
+        if not continuous:
+            self.continuous = False
             self._init_non_continuous()
         else:
-            self.continous = True
-            self.frameMultiplier = self.TR * continous_multiplier
-            self.nContinousFrames = int(self.nFrames * self.frameMultiplier)
-            self.continousBlankLength = int(blank_duration * self.frameMultiplier)
+            self.continuous = True
+            self.frameMultiplier = self.TR * continuous_multiplier
+            self.ncontinuousFrames = int(self.nFrames * self.frameMultiplier)
+            self.continuousBlankLength = int(blank_duration * self.frameMultiplier)
             # Recompute framesPerCrossing using continuous parameters
             self.framesPerCrossing = self._compute_frames_per_crossing(
-                continous, blank_duration
+                continuous, blank_duration
             )
             self._init_continuous()
 
-    def _compute_frames_per_crossing(self, continous, blank_duration):
-        if not continous:
+    def _compute_frames_per_crossing(self, continuous, blank_duration):
+        if not continuous:
             return int(
                 (self.nFrames - self.nBlanks * self.blankLength) / self.crossings
             )
         else:
             return int(
-                (self.nContinousFrames - 4 * self.continousBlankLength) / self.crossings
+                (self.ncontinuousFrames - 4 * self.continuousBlankLength)
+                / self.crossings
             )
 
     def _compute_bar_width(self, overlap):
@@ -128,9 +129,9 @@ class barStimulus(Stimulus):
 
     def _init_continuous(self):
         self._stimRaw = np.zeros(
-            (self.nContinousFrames, self._stimSize, self._stimSize)
+            (self.ncontinuousFrames, self._stimSize, self._stimSize)
         )
-        self._stimBase = np.zeros(self.nContinousFrames)
+        self._stimBase = np.zeros(self.ncontinuousFrames)
         self.jump_size = self.overlap * self.bar_width / self.frameMultiplier
 
         it = 0
@@ -150,7 +151,7 @@ class barStimulus(Stimulus):
                 self._stimBase[it] = np.mod(cross, 2) + 1
                 it += 1
             if cross % 2 != 0:
-                it += self.continousBlankLength
+                it += self.continuousBlankLength
 
         self._create_mask(self._stimRaw.shape)
         self._stimUnc = np.zeros(self._stimRaw.shape)
