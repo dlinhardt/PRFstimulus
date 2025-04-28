@@ -1,4 +1,5 @@
 import numpy as np
+import nibabel as nib
 from skimage.transform import resize
 import matplotlib.pyplot as plt
 from copy import deepcopy
@@ -390,6 +391,34 @@ class Stimulus:
         print(f"Saving {oName}... ")
         savemat(oName, oMat, do_compression=True)
         print("saved.")
+
+    def saveNiftiStimulus(self, oName):
+        """
+        Saves the stimulus data as a NIfTI file.
+
+        Parameters:
+        -----------
+        oName : str
+            The output file name (including path) where the NIfTI file will be saved.
+
+        Notes:
+        ------
+        - Stimulus will be saved without flickering.
+        """
+
+        # self._stimUnc is originally in (T, X, Y) format so, reorganize it to (X, Y, T)
+        stim_reoriented = np.transpose(self._stimUnc, (1, 2, 0)) 
+        stim_reoriented = stim_reoriented[:, :, None, :]
+
+        img = nib.Nifti1Image(stim_reoriented.astype(float), np.eye(4))                
+        img.header["pixdim"][1:5] = [1, 1, 1, self.TR]
+        img.header["qoffset_x"] = img.header["qoffset_y"] = img.header[
+            "qoffset_z"
+        ] = 1
+        img.header["cal_max"] = 1
+        img.header["xyzt_units"] = 10
+        nib.save(img, oName)
+        print(f"saving file in {oName}")        
 
     def playVid(self, z=None, flicker=False, gpu=False):
         """play the stimulus video, if not defined otherwise, the unconvolved stimulus"""
