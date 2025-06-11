@@ -50,19 +50,24 @@ class barStimulus(Stimulus):
         self.crossings = len(self.startingDirection)
         self.nBlanks = 4
 
+        # Compute frames per crossing and bar width parameters
+        self.framesPerCrossing = self._compute_frames_per_crossing(
+            False, blank_duration
+        )
+        self._compute_bar_width(overlap)
+
         if not continuous:
             self.continuous = False
-            self.framesPerCrossing = self._compute_frames_per_crossing(continuous, blank_duration)
-            self._compute_bar_width(overlap)
             self._init_non_continuous()
         else:
             self.continuous = True
             self.frameMultiplier = self.TR * continuous_multiplier
             self.ncontinuousFrames = int(self.nFrames * self.frameMultiplier)
             self.continuousBlankLength = int(blank_duration * self.frameMultiplier)
-            # Now that ncontinuousFrames and continuousBlankLength are set, call:
-            self.framesPerCrossing = self._compute_frames_per_crossing(continuous, blank_duration)
-            self._compute_bar_width(overlap)
+            # Recompute framesPerCrossing using continuous parameters
+            self.framesPerCrossing = self._compute_frames_per_crossing(
+                continuous, blank_duration
+            )
             self._init_continuous()
 
     def _compute_frames_per_crossing(self, continuous, blank_duration):
