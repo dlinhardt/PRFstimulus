@@ -853,6 +853,6 @@ class Stimulus:
             binarized_image[binarized_image == 0] = 255
             word_images.append(binarized_image)
 
-        plt.ion()
         plt.close("all")
+        plt.ion()
         return word_images
