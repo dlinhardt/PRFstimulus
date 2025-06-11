@@ -50,7 +50,7 @@ class barStimulus(Stimulus):
 
         # Compute frames per crossing and bar width parameters
         self.framesPerCrossing = self._compute_frames_per_crossing(
-            continuous, blank_duration
+            False, blank_duration
         )
         self._compute_bar_width(overlap)
 

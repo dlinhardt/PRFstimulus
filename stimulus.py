@@ -103,7 +103,7 @@ except:
         if len([v for v in [peak_delay, peak_disp, under_delay, under_disp] if v <= 0]):
             raise ValueError("delays and dispersions must be > 0")
         # gamma.pdf only defined for t > 0
-        hrf = np.zeros(t.shape, dtype=np.float64)
+        hrf = np.zeros(t.shape, dtype=np.float32)
         pos_t = t[t > 0]
         peak = sps.gamma.pdf(pos_t, peak_delay / peak_disp, loc=0, scale=peak_disp)
         undershoot = sps.gamma.pdf(
@@ -316,7 +316,7 @@ class Stimulus:
                 fixSeq[i : i + 4 * chunkSize] = colour
                 i += 4 * chunkSize
             else:
-                if np.random.rand() < 0.4:
+                if np.random.rand() < 0.5:
                     colour = 1 if colour == 2 else 2
                 i += chunkSize
         return fixSeq.astype("uint8")
@@ -326,7 +326,7 @@ class Stimulus:
         oStim = {
             "images": np.uint8(self.flickerUncStim),
             "seq": np.uint16(self._flickerSeq + 1),
-            "seqtiming": np.float64(self._flickerSeqTimeing),
+            "seqtiming": np.float32(self._flickerSeqTimeing),
             "cmap": np.vstack((np.linspace(0, 1, 256),) * 3).T,
             "fixSeq": self.fixSeq,
         }
@@ -335,35 +335,35 @@ class Stimulus:
             "fixation": "disk",
             "modality": "fMRI",
             "trigger": "scanner triggers computer",
-            "period": np.float64(len(self._flickerSeq) / self.flickerFrequency),
-            "tempFreq": np.float64(self.flickerFrequency),
-            "tr": np.float64(self.TR),
-            "scanDuration": np.float64(len(self._flickerSeq) / self.flickerFrequency),
+            "period": np.float32(len(self._flickerSeq) / self.flickerFrequency),
+            "tempFreq": np.float32(self.flickerFrequency),
+            "tr": np.float32(self.TR),
+            "scanDuration": np.float32(len(self._flickerSeq) / self.flickerFrequency),
             "saveMatrix": "None",
             "interleaves": [],
-            "numImages": np.float64(self.nFrames),
+            "numImages": np.float32(self.nFrames),
             "stimSize": "max",
-            "stimSizePix": np.float64(self._stimSize),
-            "radius": np.float64(self._maxEcc),
-            "prescanDuration": np.float64(0),
-            "runPriority": np.float64(7),
+            "stimSizePix": np.float32(self._stimSize),
+            "radius": np.float32(self._maxEcc),
+            "prescanDuration": np.float32(0),
+            "runPriority": np.float32(7),
             "calibration": [],
-            "numCycles": np.float64(1),
-            "repetitions": np.float64(1),
-            "motionSteps": np.float64(2),
-            "countdown": np.float64(0),
-            "startScan": np.float64(0),
+            "numCycles": np.float32(1),
+            "repetitions": np.float32(1),
+            "motionSteps": np.float32(2),
+            "countdown": np.float32(0),
+            "startScan": np.float32(0),
         }
         if hasattr(self, "_onsets"):
             oPara["onsets"] = self._onsets
         if hasattr(self, "_regressors"):
             oPara["regressors"] = self._regressors
         if self.stimulus_type == "bar":
-            oPara["barWidthDeg"] = np.float64(
+            oPara["barWidthDeg"] = np.float32(
                 np.round(self.bar_width / self._stimSize * self._maxEcc * 2, 2)
             )
             if self._loadImages is None:
-                oPara["checkerSize"] = np.float64(
+                oPara["checkerSize"] = np.float32(
                     np.round(self.checkSize / self._stimSize * self._maxEcc, 2)
                 )
         if hasattr(self, "_chosen_words"):
@@ -718,13 +718,28 @@ class Stimulus:
                 raise Exception(
                     "Please provide only one word_list for continuous paradigm!"
                 )
+            if word_list[0][0].endswith(".png"):
+                raise Exception(
+                    "Please provide only one word_list if you provide the word images already!"
+                )
             word_images1 = self._create_word_images(word_list[0], word_size)
             word_images2 = self._create_word_images(word_list[1], word_size)
             self._word_images = (word_images1, word_images2)
             self._multiple_word_lists = True
         else:
-            self._word_images = self._create_word_images(word_list, word_size)
-            self._multiple_word_lists = False
+            if word_list[0].endswith(".png"):
+                self._word_images = []
+                for word in word_list:
+                    im = plt.imread(word).mean(-1)
+                    u, c = np.unique(im, return_counts=True)
+                    im[im == u[c.argmax()]] = self.background
+                    im[im != self.background] = 255
+                    self._word_images.append(im)
+
+                self._multiple_word_lists = False
+            else:
+                self._word_images = self._create_word_images(word_list, word_size)
+                self._multiple_word_lists = False
 
         # Keep a copy of the original stimulus
         self._stimUncOrig = deepcopy(self._stimUnc)
