@@ -330,7 +330,7 @@ class Stimulus:
         Optionally restrict to selected fields."""
         oStim = {
             "images": np.uint8(self.flickerUncStim),
-            "seq": np.uint16(self._flickerSeq + 1),
+            "seq": np.uint16(self._flickerSeq),
             "seqtiming": np.float64(self._flickerSeqTimeing),
             "cmap": np.vstack((np.linspace(0, 1, 256),) * 3).T,
             "fixSeq": self.fixSeq,
@@ -381,7 +381,7 @@ class Stimulus:
             oPara = {k: v for k, v in oPara.items() if k in para_fields}
         return oStim, oPara
 
-    def saveMrVistaStimulus(self, oName, triggerKey="6", gpu=False):
+    def saveMrVistaStimulus(self, oName, gpu=False):
         """
         Save the created stimulus as mrVista _images and _params to present it at the scanner.
         """
@@ -392,6 +392,7 @@ class Stimulus:
 
         self.fixSeq = self._create_fixation_sequence(len(self._flickerSeq))
         oStim, oPara = self._prepare_output()
+        oStim['seq'] = oStim['seq'] + 1 # mrVista uses 1-based indexing
         oMat = {
             "stimulus": oStim,
             "params": oPara,
