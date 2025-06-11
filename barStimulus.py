@@ -13,6 +13,7 @@ class barStimulus(Stimulus):
         maxEcc=7,
         overlap=1 / 2,
         nBars=1,
+        nBarShift=None,
         doubleBarRot=0,
         thickRatio=1,
         continuous=False,
@@ -41,6 +42,7 @@ class barStimulus(Stimulus):
         self.stimulus_type = "bar"
         self.startingDirection = startingDirection
         self.nBars = nBars
+        self.nBarShift = nBarShift
         self.doubleBarRot = doubleBarRot
         self.thickRatio = thickRatio
         self.forceBarWidth = forceBarWidth
@@ -158,56 +160,33 @@ class barStimulus(Stimulus):
         self._stimUnc[:, self._stimMask] = self._stimRaw[:, self._stimMask]
 
     def _apply_multiple_bars(self, frame, i):
-        """Helper to modify frame when multiple bars are used."""
-        self.nBarShift = self._stimSize // self.nBars
-        frame2 = np.zeros((self._stimSize, self._stimSize))
-        frame3 = np.zeros((self._stimSize, self._stimSize))
+        """Helper to modify frame when multiple bars are used (with wraparound support)."""
+        if hasattr(self, 'nBarShift') and self.nBarShift is None:
+            self.nBarShift = self._stimSize // self.nBars
 
-        for nbar in range(self.nBars - 1):
-            if i == 0:
-                o = max(
-                    int(np.ceil(self._stimSize / 2 - 1)),
-                    int(
-                        self.jump_size * (i - 1)
-                        + self.bar_width * self.thickRatio * 0.55
-                        + self.nBarShift * (nbar + 1)
-                    ),
-                )
-                t = int(
-                    self.jump_size * (i - 1)
-                    + self.bar_width * self.thickRatio
-                    + self.nBarShift * (nbar + 1)
-                )
-            elif i == self.framesPerCrossing - 1:
-                o = int(self.jump_size * (i - 1) + self.nBarShift * (nbar + 1))
-                t = int(
-                    self.jump_size * (i - 1)
-                    + self.bar_width * self.thickRatio * 0.45
-                    + self.nBarShift * (nbar + 1)
-                )
-            else:
-                o = int(self.jump_size * (i - 1) + self.nBarShift * (nbar + 1))
-                t = int(
-                    self.jump_size * (i - 1)
-                    + self.bar_width * self.thickRatio
-                    + self.nBarShift * (nbar + 1)
-                )
+        new_frame = np.copy(frame)
 
-            frame2[:, max(0, o) : min(self._stimSize, t)] = 1
-            frame3[
-                :,
-                max(0, o - self._stimSize) : max(
-                    0,
-                    min(
-                        int(np.floor(self._stimSize / 2)),
-                        min(self._stimSize, t - self._stimSize),
-                    ),
-                ),
-            ] = 1
-            frame2 = skiT.rotate(frame2, self.doubleBarRot, order=0)
-            frame3 = skiT.rotate(frame3, self.doubleBarRot, order=0)
-            frame = np.any(np.stack((frame, frame2, frame3), axis=2), axis=2)
-        return frame
+        for nbar in range(1, self.nBars):
+            # Shift the base bar along the x-axis by nBarShift * nbar
+            shift = self.nBarShift * nbar
+
+            # Create the same base bar
+            bar = np.zeros_like(frame)
+            start = int(self.jump_size * (i - 1))
+            end = int(start + self.bar_width * self.thickRatio)
+            bar[:, max(0, start):min(self._stimSize, end)] = 1
+
+            # Apply shift with wrapping
+            bar_shifted = np.roll(bar, shift=shift, axis=1)
+
+            # Optional rotation for doubleBarRot
+            if self.doubleBarRot != 0:
+                bar_shifted = skiT.rotate(bar_shifted, self.doubleBarRot, order=0)
+
+            # Combine it with the new frame using logical OR
+            new_frame = np.any(np.stack((new_frame, bar_shifted), axis=2), axis=2)
+
+        return new_frame
 
     def _checkerboard(self, nChecks=10):
         """Create the four flickering main images for the stimulus."""
