@@ -1,8 +1,8 @@
 import numpy as np
 import skimage.transform as skiT
 
-from .stimulus import Stimulus
 from .barStimulus import barStimulus
+from .stimulus import Stimulus
 from .wedgeStimulus import wedgeStimulus
 
 

@@ -161,7 +161,7 @@ class barStimulus(Stimulus):
 
     def _apply_multiple_bars(self, frame, i):
         """Helper to modify frame when multiple bars are used (with wraparound support)."""
-        if hasattr(self, 'nBarShift') and self.nBarShift is None:
+        if hasattr(self, "nBarShift") and self.nBarShift is None:
             self.nBarShift = self._stimSize // self.nBars
 
         new_frame = np.copy(frame)
@@ -174,7 +174,7 @@ class barStimulus(Stimulus):
             bar = np.zeros_like(frame)
             start = int(self.jump_size * (i - 1))
             end = int(start + self.bar_width * self.thickRatio)
-            bar[:, max(0, start):min(self._stimSize, end)] = 1
+            bar[:, max(0, start) : min(self._stimSize, end)] = 1
 
             # Apply shift with wrapping
             bar_shifted = np.roll(bar, shift=shift, axis=1)
@@ -190,7 +190,33 @@ class barStimulus(Stimulus):
 
     def _checkerboard(self, nChecks=10):
         """Create the four flickering main images for the stimulus."""
-        self._compute_check_parameters(nChecks)
+
+        def _compute_check_parameters(self, nChecks):
+            """Compute checkSize and nChecks based on stimulus size and bar width."""
+            if hasattr(self, "bar_width"):
+                self.checkSize = int(
+                    np.min(
+                        (
+                            np.ceil(self._stimSize / nChecks / 2).astype(int),
+                            np.ceil(self.bar_width / 1.5),
+                        )
+                    )
+                )
+                self.nChecks = int(np.ceil(self._stimSize / self.checkSize / 2))
+            else:
+                self.checkSize = int(np.ceil(self._stimSize / nChecks / 2))
+                self.nChecks = nChecks
+
+        def _generate_and_crop(self, pattern, crop):
+            """
+            Generate a checker image using np.kron and crop it.
+
+            crop: tuple (top, bottom, left, right) used as slice indices.
+            """
+            board = np.kron(pattern, np.ones((self.checkSize, self.checkSize)))
+            return board[crop[0] : crop[1], crop[2] : crop[3]]
+
+        _compute_check_parameters(self, nChecks)
 
         # Define cropping slices for two sets of images
         crop_main = (
@@ -211,8 +237,8 @@ class barStimulus(Stimulus):
         patternB = np.tile([[255, 0], [0, 255]], (self.nChecks + 1, self.nChecks + 1))
 
         # Generate and crop checkA and checkB
-        self.checkA = self._generate_and_crop(patternA, crop_main)
-        self.checkB = self._generate_and_crop(patternB, crop_main)
+        self.checkA = _generate_and_crop(self, patternA, crop_main)
+        self.checkB = _generate_and_crop(self, patternB, crop_main)
 
         # Generate rotated versions for checkC and checkD using skimage.transform.rotate
         rotatedA = skiT.rotate(
@@ -239,31 +265,6 @@ class barStimulus(Stimulus):
         self.checkB = self._crop_to_stimSize(self.checkB)
         self.checkC = self._crop_to_stimSize(self.checkC)
         self.checkD = self._crop_to_stimSize(self.checkD)
-
-    def _compute_check_parameters(self, nChecks):
-        """Compute checkSize and nChecks based on stimulus size and bar width."""
-        if hasattr(self, "bar_width"):
-            self.checkSize = int(
-                np.min(
-                    (
-                        np.ceil(self._stimSize / nChecks / 2).astype(int),
-                        np.ceil(self.bar_width / 1.5),
-                    )
-                )
-            )
-            self.nChecks = int(np.ceil(self._stimSize / self.checkSize / 2))
-        else:
-            self.checkSize = int(np.ceil(self._stimSize / nChecks / 2))
-            self.nChecks = nChecks
-
-    def _generate_and_crop(self, pattern, crop):
-        """
-        Generate a checker image using np.kron and crop it.
-
-        crop: tuple (top, bottom, left, right) used as slice indices.
-        """
-        board = np.kron(pattern, np.ones((self.checkSize, self.checkSize)))
-        return board[crop[0] : crop[1], crop[2] : crop[3]]
 
     def _crop_to_stimSize(self, img):
         """
