@@ -1,4 +1,5 @@
 import numpy as np
+import nibabel as nib
 from skimage.transform import resize
 import matplotlib.pyplot as plt
 from copy import deepcopy
@@ -9,6 +10,7 @@ import subprocess
 from glob import glob
 import os
 from scipy.io import loadmat, savemat
+import h5py
 
 try:
     import cupy as cp
@@ -321,8 +323,11 @@ class Stimulus:
                 i += chunkSize
         return fixSeq.astype("uint8")
 
-    def _prepare_output(self):
-        """Prepare output dictionaries for saving stimulus."""
+    def _prepare_output(self,
+                    stim_fields=None,
+                    para_fields=None):
+        """Prepare output dictionaries for saving stimulus.
+        Optionally restrict to selected fields."""
         oStim = {
             "images": np.uint8(self.flickerUncStim),
             "seq": np.uint16(self._flickerSeq + 1),
@@ -369,9 +374,14 @@ class Stimulus:
         if hasattr(self, "_chosen_words"):
             oPara["chosen_words"] = self._chosen_words
 
+        # Restrict to selected fields if specified
+        if stim_fields is not None:
+            oStim = {k: v for k, v in oStim.items() if k in stim_fields}
+        if para_fields is not None:
+            oPara = {k: v for k, v in oPara.items() if k in para_fields}
         return oStim, oPara
 
-    def saveMrVistaStimulus(self, oName, triggerKey="6", gpu=False):
+    def saveMrVistaStimulus(self, oName, gpu=False):
         """
         Save the created stimulus as mrVista _images and _params to present it at the scanner.
         """
@@ -382,6 +392,7 @@ class Stimulus:
 
         self.fixSeq = self._create_fixation_sequence(len(self._flickerSeq))
         oStim, oPara = self._prepare_output()
+        oStim['seq'] = oStim['seq'] + 1 # mrVista uses 1-based indexing
         oMat = {
             "stimulus": oStim,
             "params": oPara,
@@ -390,6 +401,70 @@ class Stimulus:
         print(f"Saving {oName}... ")
         savemat(oName, oMat, do_compression=True)
         print("saved.")
+
+    def saveHDF5Stimulus(self, oName, gpu=False):
+        """
+        Save the created stimulus as HDF5 for Python presentation.
+        Only saves selected fields needed for PythonStimulusLoader.
+        """
+        if not hasattr(self, "_flickerSeq"):
+            self.flickeringStim(compress=True, gpu=gpu)
+        else:
+            self._compress_stimulus(gpu=gpu)
+
+        self.fixSeq = self._create_fixation_sequence(len(self._flickerSeq))
+        # Only keep the fields needed for Python presentation
+        stim_fields = ["images", "seq", "cmap"]
+        para_fields = [
+            "tr", "tempFreq", "scanDuration", "barWidthDeg", "checkerSize",
+            "onsets", "regressors", "chosen_words"
+        ]
+        oStim, oPara = self._prepare_output(stim_fields=stim_fields, para_fields=para_fields)
+
+        print(f"Saving {oName}... ")
+        with h5py.File(oName, "w") as f:
+            # Create 'stimulus' group and save oStim fields as datasets
+            stim_group = f.create_group("stimulus")
+            for k, v in oStim.items():
+                stim_group.create_dataset(k, data=v, compression="gzip")
+            # Create 'params' group and save oPara fields as datasets or attributes
+            params_group = f.create_group("params")
+            for k, v in oPara.items():
+                # Save arrays and lists as datasets
+                if isinstance(v, (np.ndarray, list)):
+                    params_group.create_dataset(k, data=v)
+                # Save scalars as attributes (convert to native types if needed)
+                else:
+                    params_group.attrs[k] = v
+        print("saved.")
+
+    def saveNiftiStimulus(self, oName):
+        """
+        Saves the stimulus data as a NIfTI file.
+
+        Parameters:
+        -----------
+        oName : str
+            The output file name (including path) where the NIfTI file will be saved.
+
+        Notes:
+        ------
+        - Stimulus will be saved without flickering.
+        """
+
+        # self._stimUnc is originally in (T, X, Y) format so, reorganize it to (X, Y, T)
+        stim_reoriented = np.transpose(self._stimUnc, (1, 2, 0))
+        stim_reoriented = stim_reoriented[:, :, None, :]
+
+        img = nib.Nifti1Image(stim_reoriented.astype(float), np.eye(4))
+        img.header["pixdim"][1:5] = [1, 1, 1, self.TR]
+        img.header["qoffset_x"] = img.header["qoffset_y"] = img.header[
+            "qoffset_z"
+        ] = 1
+        img.header["cal_max"] = 1
+        img.header["xyzt_units"] = 10
+        nib.save(img, oName)
+        print(f"saving file in {oName}")
 
     def playVid(self, z=None, flicker=False, gpu=False):
         """play the stimulus video, if not defined otherwise, the unconvolved stimulus"""
@@ -868,6 +943,6 @@ class Stimulus:
             binarized_image[binarized_image == 0] = 255
             word_images.append(binarized_image)
 
-        plt.ion()
         plt.close("all")
+        plt.ion()
         return word_images
