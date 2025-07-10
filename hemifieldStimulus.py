@@ -206,7 +206,7 @@ class hemifieldStimulus(Stimulus):
             start_tr = end_tr
 
     def _create_hemisphere_stimulus(self):
-        """Create the flickering hemisphere stimulus, calculated in TRs."""
+        """Create the hemisphere stimulus, calculated in TRs."""
 
         self._stimUnc = np.ones((self.nTRs, self._stimSize, self._stimSize))
 
@@ -223,7 +223,7 @@ class hemifieldStimulus(Stimulus):
             condition = period["condition"]
 
             if condition == 0:
-                continue
+                mask = np.zeros((self._stimSize, self._stimSize), dtype=bool)
             elif condition == 1:
                 mask = self._left_mask
             elif condition == 2:

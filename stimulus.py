@@ -1,16 +1,16 @@
-import numpy as np
-import nibabel as nib
-from skimage.transform import resize
-import matplotlib.pyplot as plt
-from copy import deepcopy
-import pickle
-from numpy.random import randint
-from copy import deepcopy
-import subprocess
-from glob import glob
 import os
-from scipy.io import loadmat, savemat
+import pickle
+import subprocess
+from copy import deepcopy
+from glob import glob
+
 import h5py
+import matplotlib.pyplot as plt
+import nibabel as nib
+import numpy as np
+from numpy.random import randint
+from scipy.io import loadmat, savemat
+from skimage.transform import resize
 
 try:
     import cupy as cp
@@ -323,14 +323,12 @@ class Stimulus:
                 i += chunkSize
         return fixSeq.astype("uint8")
 
-    def _prepare_output(self,
-                    stim_fields=None,
-                    para_fields=None):
+    def _prepare_output(self, stim_fields=None, para_fields=None):
         """Prepare output dictionaries for saving stimulus.
         Optionally restrict to selected fields."""
         oStim = {
             "images": np.uint8(self.flickerUncStim),
-            "seq": np.uint16(self._flickerSeq + 1),
+            "seq": np.uint16(self._flickerSeq),
             "seqtiming": np.float32(self._flickerSeqTimeing),
             "cmap": np.vstack((np.linspace(0, 1, 256),) * 3).T,
             "fixSeq": self.fixSeq,
@@ -392,7 +390,7 @@ class Stimulus:
 
         self.fixSeq = self._create_fixation_sequence(len(self._flickerSeq))
         oStim, oPara = self._prepare_output()
-        oStim['seq'] = oStim['seq'] + 1 # mrVista uses 1-based indexing
+        oStim["seq"] = oStim["seq"] + 1  # mrVista uses 1-based indexing
         oMat = {
             "stimulus": oStim,
             "params": oPara,
@@ -416,10 +414,18 @@ class Stimulus:
         # Only keep the fields needed for Python presentation
         stim_fields = ["images", "seq", "cmap"]
         para_fields = [
-            "tr", "tempFreq", "scanDuration", "barWidthDeg", "checkerSize",
-            "onsets", "regressors", "chosen_words"
+            "tr",
+            "tempFreq",
+            "scanDuration",
+            "barWidthDeg",
+            "checkerSize",
+            "onsets",
+            "regressors",
+            "chosen_words",
         ]
-        oStim, oPara = self._prepare_output(stim_fields=stim_fields, para_fields=para_fields)
+        oStim, oPara = self._prepare_output(
+            stim_fields=stim_fields, para_fields=para_fields
+        )
 
         print(f"Saving {oName}... ")
         with h5py.File(oName, "w") as f:
@@ -458,9 +464,7 @@ class Stimulus:
 
         img = nib.Nifti1Image(stim_reoriented.astype(float), np.eye(4))
         img.header["pixdim"][1:5] = [1, 1, 1, self.TR]
-        img.header["qoffset_x"] = img.header["qoffset_y"] = img.header[
-            "qoffset_z"
-        ] = 1
+        img.header["qoffset_x"] = img.header["qoffset_y"] = img.header["qoffset_z"] = 1
         img.header["cal_max"] = 1
         img.header["xyzt_units"] = 10
         nib.save(img, oName)
@@ -779,7 +783,8 @@ class Stimulus:
                     self.carrierImages %= self.carrierImages.max()
                 self.carrierImages *= 255
                 self.carrierImages = self.carrierImages.astype(int)
-
+        # elif os.path.isdir(loadImages):
+        #     pass
         else:
             raise Exception("Please provide carrier images as .mat file!")
 
