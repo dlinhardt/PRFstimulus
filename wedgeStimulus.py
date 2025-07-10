@@ -25,7 +25,7 @@ class wedgeStimulus(Stimulus):
             stim_duration=stim_duration,
             blank_duration=blank_duration,
         )
-        self.stimulus_type = 'wedge'
+        self.stimulus_type = "wedge"
 
         self.overlap = overlap
 
@@ -43,12 +43,12 @@ class wedgeStimulus(Stimulus):
 
         # define meshgrid in polar corrdinates
         self.X, self.Y = np.meshgrid(
-            np.linspace(-self._stimSize // 2, self._stimSize // 2 - 1, self._stimSize) +
-            0.5,
-            np.linspace(-self._stimSize // 2, self._stimSize // 2 - 1, self._stimSize) +
-            0.5,
+            np.linspace(-self._stimSize // 2, self._stimSize // 2 - 1, self._stimSize)
+            + 0.5,
+            np.linspace(-self._stimSize // 2, self._stimSize // 2 - 1, self._stimSize)
+            + 0.5,
         )
-        self.R, self.P = np.sqrt(self.X ** 2 + self.Y ** 2), np.arctan2(self.Y, self.X)
+        self.R, self.P = np.sqrt(self.X**2 + self.Y**2), np.arctan2(self.Y, self.X)
         self.P[self.P < 0] += 2 * np.pi
 
         self._stimRaw = np.zeros((self.nFrames, self._stimSize, self._stimSize))
@@ -127,15 +127,19 @@ class wedgeStimulus(Stimulus):
         self.nFlickerRings = nFlickerRings
         self.nFlickerWedge = nFlickerWedge
 
-        if not hasattr(self, 'R'):
+        if not hasattr(self, "R"):
             # define meshgrid in polar corrdinates
             self.X, self.Y = np.meshgrid(
-                np.linspace(-self._stimSize // 2, self._stimSize // 2 - 1, self._stimSize) +
-                0.5,
-                np.linspace(-self._stimSize // 2, self._stimSize // 2 - 1, self._stimSize) +
-                0.5,
+                np.linspace(
+                    -self._stimSize // 2, self._stimSize // 2 - 1, self._stimSize
+                )
+                + 0.5,
+                np.linspace(
+                    -self._stimSize // 2, self._stimSize // 2 - 1, self._stimSize
+                )
+                + 0.5,
             )
-            self.R, self.P = np.sqrt(self.X ** 2 + self.Y ** 2), np.arctan2(self.Y, self.X)
+            self.R, self.P = np.sqrt(self.X**2 + self.Y**2), np.arctan2(self.Y, self.X)
             self.P[self.P < 0] += 2 * np.pi
 
         flickerRingsWidth = self._stimSize / (self.nFlickerRings) / 2
@@ -158,3 +162,6 @@ class wedgeStimulus(Stimulus):
 
                 self.checkA[msk] = np.mod(ring + wedge, 2)
                 self.checkB[msk] = np.mod(ring + wedge + 1, 2)
+
+        self.checkA = np.where(self.checkA > 0.5, 0, 255)
+        self.checkB = np.where(self.checkB > 0.5, 0, 255)

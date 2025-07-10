@@ -15,7 +15,7 @@ class hemifieldStimulus(Stimulus):
         stimSize=101,
         maxEcc=10,
         TR=2,
-        total_duration=300,
+        stim_duration=300,
         stim_on_duration=7,
         stim_off_duration=10,
         stim_jitter=2,
@@ -30,7 +30,7 @@ class hemifieldStimulus(Stimulus):
             stimSize=stimSize,
             maxEcc=maxEcc,
             TR=TR,
-            stim_duration=total_duration,
+            stim_duration=stim_duration,
             blank_duration=0,
             loadImages=loadImages,
             flickerFrequency=flickerFrequency,
@@ -44,10 +44,12 @@ class hemifieldStimulus(Stimulus):
         self.stim_jitter = stim_jitter
         self.off_jitter = off_jitter
         self.gap_degrees = gap_degrees
-        self.total_duration = total_duration
+        self.total_duration = stim_duration
         self.whichCheck = whichCheck
         self._loadImages = loadImages
         self._carrier = "images" if self._loadImages is not None else "checker"
+
+        self.nTRs = int(np.ceil(self.total_duration / self.TR))
 
         # Create hemisphere masks
         self._create_hemisphere_masks()
@@ -121,64 +123,92 @@ class hemifieldStimulus(Stimulus):
         self._right_mask = right_condition & self._fov_mask
 
     def _generate_stimulus_sequence(self):
-        """Generate randomized sequence of left/right/off periods with no consecutive repeats."""
+        """Generate a sequence: 1 (on), 2 (on), 0 (off) with random durations, repeat until run time-20s, then shuffle blocks so that no same conditions are adjacent."""
+        import random
+
+        blocks = []
         current_time = 0
-        self._sequence = []
-        last_condition = None  # Track the last condition to avoid repeats
-
-        while current_time < self.total_duration:
-            # Choose condition ensuring it's different from the last one
-            if last_condition is None:
-                # First condition can be anything
-                condition = np.random.choice([0, 1, 2])
-            else:
-                # Choose from the two conditions that are different from last_condition
-                available_conditions = [c for c in [0, 1, 2] if c != last_condition]
-                condition = np.random.choice(available_conditions)
-
-            if condition == 0:  # Off period
-                duration = self.stim_off_duration + np.random.uniform(
-                    -self.off_jitter, self.off_jitter
-                )
-                duration = max(0.1, duration)  # Minimum duration
-            else:  # On period (left or right)
-                duration = self.stim_on_duration + np.random.uniform(
-                    -self.stim_jitter, self.stim_jitter
-                )
-                duration = max(0.1, duration)  # Minimum duration
-
-            # Check if we have time for this period
-            if current_time + duration > self.total_duration:
-                duration = self.total_duration - current_time
-
-            # Calculate frame indices
-            start_frame = int(current_time * self.flickerFrequency)
-            end_frame = int((current_time + duration) * self.flickerFrequency)
-
-            self._sequence.append(
-                {
-                    "condition": condition,  # 0=off, 1=left, 2=right
-                    "start_time": current_time,
-                    "duration": duration,
-                    "end_time": current_time + duration,
-                    "start_frame": start_frame,
-                    "end_frame": end_frame,
-                }
+        # Generate blocks until we reach total_duration - 20s
+        while current_time < self.total_duration - 20:
+            # Condition 1 (on)
+            dur1 = self.stim_on_duration + random.uniform(
+                -self.stim_jitter, self.stim_jitter
             )
+            dur1 = max(self.TR, dur1)
+            blocks.append((1, dur1))
+            current_time += dur1
+            if current_time >= self.total_duration - 20:
+                break
+            # Condition 2 (on)
+            dur2 = self.stim_on_duration + random.uniform(
+                -self.stim_jitter, self.stim_jitter
+            )
+            dur2 = max(self.TR, dur2)
+            blocks.append((2, dur2))
+            current_time += dur2
+            if current_time >= self.total_duration - 20:
+                break
+            # Condition 0 (off)
+            duroff = self.stim_off_duration + random.uniform(
+                -self.off_jitter, self.off_jitter
+            )
+            duroff = max(self.TR, duroff)
+            blocks.append((0, duroff))
+            current_time += duroff
 
-            # Update tracking variables
-            last_condition = condition
-            current_time += duration
+        # Shuffle blocks, keep the shuffle with the least adjacent repeats
+        def count_adjacent_repeats(lst):
+            return sum(lst[i][0] == lst[i + 1][0] for i in range(len(lst) - 1))
 
-            if current_time >= self.total_duration:
+        best_blocks = None
+        min_repeats = float("inf")
+        for _ in range(1000):
+            random.shuffle(blocks)
+            repeats = count_adjacent_repeats(blocks)
+            if repeats < min_repeats:
+                min_repeats = repeats
+                best_blocks = list(blocks)
+            if repeats == 0:
                 break
 
+        # Use the best shuffle found
+        blocks = best_blocks
+
+        # Convert blocks to TR-wise sequence
+        seq = []
+        for cond, dur in blocks:
+            ntr = int(round(dur / self.TR))
+            seq.extend([cond] * ntr)
+
+        # If too short, pad with off; if too long, trim
+        nTRs = self.nTRs
+        if len(seq) < nTRs:
+            seq.extend([0] * (nTRs - len(seq)))
+        elif len(seq) > nTRs:
+            seq = seq[:nTRs]
+
+        # Store as periods for compatibility
+        self._sequence = []
+        start_tr = 0
+        while start_tr < nTRs:
+            cond = seq[start_tr]
+            end_tr = start_tr + 1
+            while end_tr < nTRs and seq[end_tr] == cond:
+                end_tr += 1
+            self._sequence.append(
+                {
+                    "condition": cond,
+                    "start_tr": start_tr,
+                    "duration_tr": end_tr - start_tr,
+                    "end_tr": end_tr,
+                }
+            )
+            start_tr = end_tr
+
     def _create_hemisphere_stimulus(self):
-        """Create the flickering hemisphere stimulus."""
-        total_frames = int(self.total_duration * self.flickerFrequency)
-        self._stimUnc = (
-            np.ones((total_frames, self._stimSize, self._stimSize)) * self.background
-        )
+        """Create the flickering hemisphere stimulus, calculated in TRs."""
+
+        self._stimUnc = np.ones((self.nTRs, self._stimSize, self._stimSize))
 
         # Create checkerboard patterns if no images provided
         if self._loadImages is None:
@@ -188,43 +218,28 @@ class hemifieldStimulus(Stimulus):
 
         # Fill in the stimulus according to sequence
         for period in self._sequence:
-            start_frame = period["start_frame"]
-            end_frame = min(period["end_frame"], total_frames)
+            start_tr = period["start_tr"]
+            end_tr = period["end_tr"]
             condition = period["condition"]
 
-            if condition == 0:  # Off - just background (already set above)
+            if condition == 0:
                 continue
-            elif condition == 1:  # Left hemisphere
+            elif condition == 1:
                 mask = self._left_mask
-            elif condition == 2:  # Right hemisphere
+            elif condition == 2:
                 mask = self._right_mask
 
-            # Apply flickering pattern to the masked region for ALL frames in this period
-            for frame_idx in range(start_frame, end_frame):
-                if frame_idx >= total_frames:
+            for tr_idx in range(start_tr, end_tr):
+                if tr_idx >= self.nTRs:
                     break
-
-                if self._loadImages is None:
-                    # Alternate between checker patterns based on frame number
-                    if frame_idx % 2 == 0:
-                        pattern = self.checkA
-                    else:
-                        pattern = self.checkB
-                    # Apply pattern only to the hemisphere mask
-                    self._stimUnc[frame_idx][mask] = pattern[mask]
-                else:
-                    # Use random image
-                    img_idx = np.random.randint(self.carrierImages.shape[-1])
-                    self._stimUnc[frame_idx][mask] = self.carrierImages[mask, img_idx]
+                self._stimUnc[tr_idx] = mask
 
         # Store sequence info for analysis
-        self._onsets = [p["start_time"] for p in self._sequence]
+        self._onsets = [p["start_tr"] * self.TR for p in self._sequence]
         self._conditions = [p["condition"] for p in self._sequence]
-        self._durations = [p["duration"] for p in self._sequence]
+        self._durations = [p["duration_tr"] * self.TR for p in self._sequence]
 
-        self._stimBase = np.ones(
-            self._stimUnc.shape[0]
-        )  # to find which checkerboard to use
+        self._stimBase = np.ones(self._stimUnc.shape[0])
 
     def _checkerboard(self):
         if "bar" in self.whichCheck:
