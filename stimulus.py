@@ -432,13 +432,13 @@ class Stimulus:
             # Create 'stimulus' group and save oStim fields as datasets
             stim_group = f.create_group("stimulus")
             for k, v in oStim.items():
-                stim_group.create_dataset(k, data=v, compression="gzip")
+                stim_group.create_dataset(k, data=v, compression="gzip", shuffle=True, fletcher32=True)
             # Create 'params' group and save oPara fields as datasets or attributes
             params_group = f.create_group("params")
             for k, v in oPara.items():
                 # Save arrays and lists as datasets
                 if isinstance(v, (np.ndarray, list)):
-                    params_group.create_dataset(k, data=v)
+                    params_group.create_dataset(k, data=v, compression="gzip", shuffle=True, fletcher32=True)
                 # Save scalars as attributes (convert to native types if needed)
                 else:
                     params_group.attrs[k] = v
@@ -459,10 +459,15 @@ class Stimulus:
         """
 
         # self._stimUnc is originally in (T, X, Y) format so, reorganize it to (X, Y, T)
+        if self.continuous:
+            stim_low_res = self._stimUnc[self.frameMultiplier//2 :: self.frameMultiplier, ...]
+        else:
+            stim_low_res = self._stimUnc
+
         stim_reoriented = np.transpose(self._stimUnc, (1, 2, 0))
         stim_reoriented = stim_reoriented[:, :, None, :]
 
-        img = nib.Nifti1Image(stim_reoriented.astype(float), np.eye(4))
+        img = nib.Nifti1Image(stim_reoriented.astype(np.float32), np.eye(4))
         img.header["pixdim"][1:5] = [1, 1, 1, self.TR]
         img.header["qoffset_x"] = img.header["qoffset_y"] = img.header["qoffset_z"] = 1
         img.header["cal_max"] = 1
