@@ -104,7 +104,7 @@ class barStimulus(Stimulus):
         self.jump_size = self.overlap * self.bar_width
 
         it = 0
-        for cross in self.startingDirection:
+        for crossI, cross in enumerate(self.startingDirection):
             for i in range(self.framesPerCrossing):
                 frame = np.zeros((self._stimSize, self._stimSize))
                 start = max(0, int(self.jump_size * (i - 1)))
@@ -122,7 +122,9 @@ class barStimulus(Stimulus):
                 self._stimRaw[it, ...] = rotated_frame
                 self._stimBase[it] = np.mod(cross, 2) + 1
                 it += 1
-            if cross % 2 != 0:
+
+            # add the blank after every second crossing
+            if crossI % 2 != 0:
                 it += self.blankLength
 
         self._create_mask(self._stimRaw.shape)
@@ -137,7 +139,7 @@ class barStimulus(Stimulus):
         self.jump_size = self.overlap * self.bar_width / self.frameMultiplier
 
         it = 0
-        for cross in self.startingDirection:
+        for crossI, cross in enumerate(self.startingDirection):
             for i in range(self.framesPerCrossing):
                 frame = np.zeros((self._stimSize, self._stimSize))
                 start = max(0, int(self.jump_size * (i - self.frameMultiplier)))
@@ -152,7 +154,9 @@ class barStimulus(Stimulus):
                 self._stimRaw[it, ...] = rotated_frame
                 self._stimBase[it] = np.mod(cross, 2) + 1
                 it += 1
-            if cross % 2 != 0:
+
+            # add the blank after every second crossing
+            if crossI % 2 != 0:
                 it += self.continuousBlankLength
 
         self._create_mask(self._stimRaw.shape)
