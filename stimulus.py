@@ -432,19 +432,23 @@ class Stimulus:
             # Create 'stimulus' group and save oStim fields as datasets
             stim_group = f.create_group("stimulus")
             for k, v in oStim.items():
-                stim_group.create_dataset(k, data=v, compression="gzip", shuffle=True, fletcher32=True)
+                stim_group.create_dataset(
+                    k, data=v, compression="gzip", shuffle=True, fletcher32=True
+                )
             # Create 'params' group and save oPara fields as datasets or attributes
             params_group = f.create_group("params")
             for k, v in oPara.items():
                 # Save arrays and lists as datasets
                 if isinstance(v, (np.ndarray, list)):
-                    params_group.create_dataset(k, data=v, compression="gzip", shuffle=True, fletcher32=True)
+                    params_group.create_dataset(
+                        k, data=v, compression="gzip", shuffle=True, fletcher32=True
+                    )
                 # Save scalars as attributes (convert to native types if needed)
                 else:
                     params_group.attrs[k] = v
         print("saved.")
 
-    def saveNiftiStimulus(self, oName):
+    def saveNiftiStimulus(self, oName, smooth=False):
         """
         Saves the stimulus data as a NIfTI file.
 
@@ -452,23 +456,38 @@ class Stimulus:
         -----------
         oName : str
             The output file name (including path) where the NIfTI file will be saved.
+        smooth : bool, optional
+            Only relevant if continuous=True. If True, saves the full temporal resolution
+            stimulus with TR set to TR/frameMultiplier. If False, saves downsampled version
+            at the original TR. Default is False.
 
         Notes:
         ------
         - Stimulus will be saved without flickering.
+        - For non-continuous stimuli, this parameter is ignored and stimUnc is saved at TR.
         """
 
         # self._stimUnc is originally in (T, X, Y) format so, reorganize it to (X, Y, T)
-        if self.continuous:
-            stim_low_res = self._stimUnc[self.frameMultiplier//2 :: self.frameMultiplier, ...]
+        if self.continuous and not smooth:
+            # Downsample to original TR
+            stim_to_save = self._stimUnc[
+                self.frameMultiplier // 2 :: self.frameMultiplier, ...
+            ]
+            tr_to_save = self.TR
+        elif self.continuous and smooth:
+            # Save full temporal resolution
+            stim_to_save = self._stimUnc
+            tr_to_save = self.TR / self.frameMultiplier
         else:
-            stim_low_res = self._stimUnc
+            # Non-continuous case
+            stim_to_save = self._stimUnc
+            tr_to_save = self.TR
 
-        stim_reoriented = np.transpose(self._stimUnc, (1, 2, 0))
+        stim_reoriented = np.transpose(stim_to_save, (1, 2, 0))
         stim_reoriented = stim_reoriented[:, :, None, :]
 
         img = nib.Nifti1Image(stim_reoriented.astype(np.float32), np.eye(4))
-        img.header["pixdim"][1:5] = [1, 1, 1, self.TR]
+        img.header["pixdim"][1:5] = [1, 1, 1, tr_to_save]
         img.header["qoffset_x"] = img.header["qoffset_y"] = img.header["qoffset_z"] = 1
         img.header["cal_max"] = 1
         img.header["xyzt_units"] = 10
@@ -498,13 +517,18 @@ class Stimulus:
                 plt.pause(1 / self.flickerFrequency)
         else:
             if not np.any(z):
-                z = self._stimUnc
+                z = self.stimUnc
             plt.figure()
 
             for i in range(z.shape[0]):
                 plt.title(i)
                 if i == 0:
-                    img_artist = plt.gca().imshow(z[i, ...], cmap="Greys")
+                    img_artist = plt.gca().imshow(
+                        z[i, ...],
+                        cmap="Greys",
+                        vmin=0,
+                        vmax=1,
+                    )
                 else:
                     img_artist.set_data(z[i, ...])
                 plt.pause(0.1)
